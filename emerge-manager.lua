@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.7
+-- Version: 1.0.8
 
-local CURRENT_VERSION = "1.0.7"
+local CURRENT_VERSION = "1.0.8"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -774,6 +774,7 @@ function ModuleManager:showHelp()
   cecho([[
 <SlateGray>==== EMERGE Module System ====<reset>
 <DimGrey>Emergent Modular Engagement & Response Generation Engine<reset>
+<SlateGray>From simplicity, emerges victory<reset>
 
 <LightSteelBlue>Core Commands:<reset>
   <SteelBlue>emodule list<reset>             List all modules (loaded & available)
@@ -837,7 +838,8 @@ function ModuleManager:showBootup()
 ]])
   
   cecho("<LightSteelBlue>    Emergent Modular Engagement & Response Generation Engine<reset>\n")
-  cecho(string.format("<DimGray>    Version %s | Event-Driven Architecture<reset>\n\n", self.version))
+  cecho(string.format("<DimGray>    Version %s | Event-Driven Architecture<reset>\n", self.version))
+  cecho("<SlateGray>    From simplicity, emerges victory<reset>\n\n")
   
   -- Bootup sequence
   local steps = {
