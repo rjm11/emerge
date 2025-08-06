@@ -1129,8 +1129,19 @@ end, true)
   end
   
   -- Enable the group to ensure it's checked in Script Editor
-  enableScript("EMERGE")
-  cecho("<LightSteelBlue>[EMERGE] Enabled script group 'EMERGE'<reset>\n")
+  cecho("<yellow>[EMERGE DEBUG] Calling enableScript('EMERGE')...<reset>\n")
+  local group_enable_result = enableScript("EMERGE")
+  cecho("<yellow>[EMERGE DEBUG] enableScript('EMERGE') returned: " .. tostring(group_enable_result) .. "<reset>\n")
+  
+  if group_enable_result == true then
+    cecho("<LightSteelBlue>[EMERGE] Successfully enabled script group 'EMERGE'<reset>\n")
+  elseif group_enable_result == false then
+    cecho("<IndianRed>[EMERGE] Failed to enable script group 'EMERGE'<reset>\n")
+  elseif group_enable_result == nil then
+    cecho("<yellow>[EMERGE] enableScript('EMERGE') returned nil - group may not exist yet or API doesn't support groups<reset>\n")
+  else
+    cecho("<yellow>[EMERGE] Unexpected return value from enableScript('EMERGE'): " .. tostring(group_enable_result) .. "<reset>\n")
+  end
   
   -- Create the loader script inside the EMERGE group
   cecho("<yellow>[EMERGE DEBUG] Creating permScript...<reset>\n")
@@ -1159,8 +1170,30 @@ end
     cecho("<LightSteelBlue>[EMERGE] Created bootloader script (ID: " .. tostring(script_id) .. ")<reset>\n")
     
     -- Enable the script to ensure it's checked in Script Editor
-    enableScript("EMERGE Module Bootloader")
-    cecho("<LightSteelBlue>[EMERGE] Enabled bootloader script<reset>\n")
+    cecho("<yellow>[EMERGE DEBUG] Calling enableScript('EMERGE Module Bootloader')...<reset>\n")
+    local script_enable_result = enableScript("EMERGE Module Bootloader")
+    cecho("<yellow>[EMERGE DEBUG] enableScript('EMERGE Module Bootloader') returned: " .. tostring(script_enable_result) .. "<reset>\n")
+    
+    if script_enable_result == true then
+      cecho("<LightSteelBlue>[EMERGE] Successfully enabled bootloader script<reset>\n")
+    elseif script_enable_result == false then
+      cecho("<IndianRed>[EMERGE] Failed to enable bootloader script<reset>\n")
+    elseif script_enable_result == nil then
+      cecho("<yellow>[EMERGE] enableScript returned nil - will retry after a delay<reset>\n")
+      -- Try again after a short delay
+      tempTimer(0.5, function()
+        cecho("<yellow>[EMERGE DEBUG] Retrying enableScript after delay...<reset>\n")
+        local retry_result = enableScript("EMERGE Module Bootloader")
+        cecho("<yellow>[EMERGE DEBUG] Retry returned: " .. tostring(retry_result) .. "<reset>\n")
+        if retry_result == true then
+          cecho("<green>[EMERGE] Successfully enabled bootloader script on retry<reset>\n")
+        else
+          cecho("<IndianRed>[EMERGE] Still unable to enable script. You may need to enable it manually in Script Editor<reset>\n")
+        end
+      end)
+    else
+      cecho("<yellow>[EMERGE] Unexpected return value: " .. tostring(script_enable_result) .. "<reset>\n")
+    end
     
     cecho("<LightSteelBlue>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
     cecho("<DimGrey>[EMERGE] Script will run automatically on profile load<reset>\n")
