@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.5
+-- Version: 1.0.6
 
-local CURRENT_VERSION = "1.0.5"
+local CURRENT_VERSION = "1.0.6"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -651,7 +651,15 @@ end
 -- Set GitHub token for private repositories
 function ModuleManager:setGitHubToken(token)
   if not token or token == "" then
-    cecho("<red>[EMERGE] Invalid token<reset>\n")
+    cecho("<yellow>[EMERGE] GitHub Token Setup<reset>\n\n")
+    cecho("<yellow>To create a GitHub personal access token:<reset>\n")
+    cecho("  1. Go to https://github.com/settings/tokens\n")
+    cecho("  2. Click 'Generate new token (classic)'\n")
+    cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
+    cecho("  4. Select the 'repo' scope checkbox\n")
+    cecho("  5. Click 'Generate token' at the bottom\n")
+    cecho("  6. Copy the token that starts with 'ghp_'\n\n")
+    cecho("<cyan>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
     return
   end
   
@@ -687,6 +695,7 @@ function ModuleManager:createAliases()
   self.aliases.upgrade_short = tempAlias("^emodule upgrade$", [[EMERGE:upgradeSelf()]])
   self.aliases.config = tempAlias("^emodule config$", [[EMERGE:showConfig()]])
   self.aliases.token = tempAlias("^emodule token (.+)$", [[EMERGE:setGitHubToken(matches[2])]])
+  self.aliases.token_help = tempAlias("^emodule token$", [[EMERGE:setGitHubToken()]])
   self.aliases.intro = tempAlias("^emodule intro$", [[EMERGE:showIntroduction()]])
   self.aliases.help = tempAlias("^emodule help$", [[EMERGE:showHelp()]])
   self.aliases.help_short = tempAlias("^emodule$", [[EMERGE:showHelp()]])
@@ -860,39 +869,12 @@ end
 
 -- Show introduction for first-time users
 function ModuleManager:showIntroduction()
-  cecho([[
-
-<green>==== Welcome to EMERGE ====<reset>
-
-EMERGE is a revolutionary module system for Mudlet that follows these principles:
-
-<yellow>1. Event-Driven Architecture<reset>
-   Modules communicate through events, not direct calls
-   This ensures modules remain independent and flexible
-
-<yellow>2. Modular Design<reset>
-   Each module provides specific functionality
-   Load only what you need for your playstyle
-
-<yellow>3. Easy Management<reset>
-   GitHub integration for simple module installation
-   Automatic updates keep your system current
-
-<cyan>Getting Started:<reset>
-]])
+  -- Skip the long intro, just check modules immediately
+  self:checkCoreModules()
   
-  tempTimer(2, function()
-    cecho([[
-<yellow>STEP 1: Check Core Modules<reset>
-The system will now check for required modules...
-
-]])
-    self:checkCoreModules()
-    
-    -- Mark first run as complete
-    self.config.first_run = false
-    self:saveConfig()
-  end)
+  -- Mark first run as complete
+  self.config.first_run = false
+  self:saveConfig()
 end
 
 -- Check and prompt for core modules
@@ -1012,11 +994,15 @@ end
 function ModuleManager:createPersistentLoader()
   -- Check if we already have a loader script
   if exists("EMERGE_Loader", "script") then
+    cecho("<DimGrey>[EMERGE] Persistent loader already exists<reset>\n")
     return
   end
   
+  cecho("<yellow>[EMERGE] Creating persistent loader...<reset>\n")
+  
   -- Create a script group first
-  permScript("EMERGE", "", "")
+  local group_id = permScript("EMERGE", "", "")
+  cecho("<green>[EMERGE] Created script group (ID: " .. tostring(group_id) .. ")<reset>\n")
   
   -- Create the loader script inside the group
   local script_id = permScript("EMERGE_Loader", "EMERGE", [[
@@ -1024,10 +1010,14 @@ function ModuleManager:createPersistentLoader()
 dofile(getMudletHomeDir() .. "/emerge-manager.lua")
 ]])
   
+  cecho("<green>[EMERGE] Created loader script (ID: " .. tostring(script_id) .. ")<reset>\n")
+  
   -- Enable the script
   enableScript("EMERGE_Loader")
+  cecho("<green>[EMERGE] Enabled loader script<reset>\n")
   
-  cecho("<green>[EMERGE] Created persistent loader (ID: " .. tostring(script_id) .. ")<reset>\n")
+  cecho("<green>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
+  cecho("<DimGrey>EMERGE will now load automatically on Mudlet startup<reset>\n")
   
   -- Also save the manager file to Mudlet home
   local current_file = debug.getinfo(1, "S").source:sub(2)
@@ -1052,4 +1042,10 @@ end
 
 -- Auto-initialize
 ModuleManager:init()
-ModuleManager:createPersistentLoader()
+
+-- Create persistent loader after a short delay to ensure Mudlet is ready
+tempTimer(0.5, function()
+  if ModuleManager then
+    ModuleManager:createPersistentLoader()
+  end
+end)
