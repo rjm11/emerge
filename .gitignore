@@ -1,3 +1,6 @@
+# Development files
+CLAUDE.md
+
 # OS generated files
 .DS_Store
 .DS_Store?
@@ -13,3 +16,8 @@ Thumbs.db
 *.swp
 *.swo
 *~
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
