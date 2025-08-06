@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.1
+-- Version: 1.1.2
 
-local CURRENT_VERSION = "1.1.1"
+local CURRENT_VERSION = "1.1.2"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -47,12 +47,6 @@ EMERGE.handlers = {}
 
 -- For backward compatibility
 ModuleManager = EMERGE
-
--- Helper function for clickable links
-function ModuleManager:mxpLink(url, text)
-  text = text or url
-  return string.format([[<send href="%s">%s</send>]], url, text)
-end
 
 -- Configuration paths
 ModuleManager.paths = {
@@ -700,7 +694,9 @@ function ModuleManager:setGitHubToken(token)
   if not token or token == "" then
     cecho("<DarkOrange>[EMERGE] GitHub Token Setup<reset>\n\n")
     cecho("<LightSteelBlue>To create a GitHub personal access token:<reset>\n")
-    cecho(string.format("  1. Go to %s\n", self:mxpLink("https://github.com/settings/tokens")))
+    cecho("  1. Go to ")
+    cechoLink("https://github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open in browser")
+    echo("\n")
     cecho("  2. Click 'Generate new token (classic)'\n")
     cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
     cecho("  4. Select the 'repo' scope checkbox\n")
@@ -955,7 +951,9 @@ function ModuleManager:checkCoreModules()
       cecho("You need a GitHub personal access token to download them.\n\n")
       
       cecho("<LightSteelBlue>Step 1: Create a GitHub Token<reset>\n")
-      cecho(string.format("  1. Go to %s\n", self:mxpLink("https://github.com/settings/tokens")))
+      cecho("  1. Go to ")
+      cechoLink("https://github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open in browser")
+      echo("\n")
       cecho("  2. Click 'Generate new token (classic)'\n")
       cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
       cecho("  4. Select the 'repo' scope\n")
@@ -968,7 +966,9 @@ function ModuleManager:checkCoreModules()
       cecho("  <SteelBlue>emodule load core<reset> - Required event system\n")
       cecho("  <SteelBlue>emodule load gmcp<reset> - Game data handler\n\n")
       
-      cecho(string.format("<DimGrey>Need help? Visit: %s<reset>\n", self:mxpLink("https://github.com/rjm11/emerge/wiki")))
+      cecho("<DimGrey>Need help? Visit: <reset>")
+      cechoLink("<DimGrey>https://github.com/rjm11/emerge/wiki<reset>", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open wiki")
+      echo("\n")
     else
       -- Token is set, show regular missing module messages
       if core_missing then
@@ -984,7 +984,9 @@ function ModuleManager:checkCoreModules()
       end
       
       cecho("<DimGrey>After installing core modules, run 'emodule list' to see available modules<reset>\n")
-      cecho(string.format("<DimGrey>Visit the wiki for more information: %s<reset>\n", self:mxpLink("https://github.com/rjm11/emerge/wiki")))
+      cecho("<DimGrey>Visit the wiki for more information: <reset>")
+      cechoLink("<DimGrey>https://github.com/rjm11/emerge/wiki<reset>", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open wiki")
+      echo("\n")
     end
   else
     cecho("<LightSteelBlue>✓ Core modules loaded successfully<reset>\n\n")
@@ -992,7 +994,9 @@ function ModuleManager:checkCoreModules()
     cecho("  emodule list    - See all available modules\n")
     cecho("  emodule help    - View all commands\n")
     cecho("  emodule github  - Add modules from GitHub\n\n")
-    cecho(string.format("<DimGrey>Visit the wiki: %s<reset>\n", self:mxpLink("https://github.com/rjm11/emerge/wiki")))
+    cecho("<DimGrey>Visit the wiki: <reset>")
+    cechoLink("<DimGrey>https://github.com/rjm11/emerge/wiki<reset>", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open wiki")
+    echo("\n")
   end
 end
 
