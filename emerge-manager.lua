@@ -555,8 +555,77 @@ end
 
 -- Update ModuleManager
 function ModuleManager:upgradeSelf()
+  -- Check for updates first if we don't have a pending update
   if not self.pending_update then
-    cecho("<DarkOrange>[EMERGE] No update available<reset>\n")
+    cecho("<DimGrey>[EMERGE] Checking for updates...<reset>\n")
+    
+    local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
+      self.github.owner,
+      self.github.repo, 
+      self.github.branch,
+      self.github.files.manager)
+    
+    -- Add headers for private repos if token is available
+    local headers = {}
+    if self.config.github_token then
+      headers["Authorization"] = "token " .. self.config.github_token
+    end
+    
+    -- Ensure cache directory exists
+    if not io.exists(self.paths.cache) then
+      lfs.mkdir(self.paths.cache)
+    end
+    
+    local check_file = self.paths.cache .. "manager-update-check.lua"
+    downloadFile(check_file, url, headers)
+    
+    registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
+      if filename == check_file then
+        local file = io.open(filename, "r")
+        if file then
+          local content = file:read("*all")
+          file:close()
+          
+          local remote_version = content:match('local CURRENT_VERSION = "([^"]+)"')
+          if remote_version and remote_version ~= self.version then
+            cecho(string.format("<DarkOrange>[EMERGE] Update available: v%s -> v%s<reset>\n",
+              self.version, remote_version))
+            
+            self.pending_update = {
+              version = remote_version,
+              content = content
+            }
+            
+            -- Now do the upgrade
+            self:doUpgrade()
+            
+          elseif remote_version == self.version then
+            cecho("<LightSteelBlue>[EMERGE] You already have the latest version (v" .. self.version .. ")<reset>\n")
+          else
+            cecho("<IndianRed>[EMERGE] Could not determine remote version<reset>\n")
+          end
+          
+          os.remove(filename)
+        end
+      end
+    end, true)
+    
+    registerAnonymousEventHandler("sysDownloadError", function(_, filename)
+      if filename == check_file then
+        cecho("<IndianRed>[EMERGE] Failed to check for updates. Check your internet connection.<reset>\n")
+      end
+    end, true)
+    
+    return
+  end
+  
+  -- If we already have a pending update, do the upgrade
+  self:doUpgrade()
+end
+
+-- Actually perform the upgrade
+function ModuleManager:doUpgrade()
+  if not self.pending_update then
     return
   end
   
@@ -576,6 +645,7 @@ function ModuleManager:upgradeSelf()
       if ok then
         cecho("<LightSteelBlue>[EMERGE] Upgrade successful!<reset>\n")
         os.remove(temp_file)
+        self.pending_update = nil
       else
         cecho(string.format("<IndianRed>[EMERGE] Upgrade failed: %s<reset>\n", err))
       end
