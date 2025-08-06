@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.0
+-- Version: 1.1.1
 
-local CURRENT_VERSION = "1.1.0"
+local CURRENT_VERSION = "1.1.1"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -471,18 +471,25 @@ function ModuleManager:loadModule(module_id)
   end)
 end
 
--- Unload a module
-function ModuleManager:unloadModule(module_id)
+-- Unload a module  
+function ModuleManager:unloadModule(module_id, confirm)
   if not module_id or module_id == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule unload <module_id><reset>\n")
+    cecho("<DimGrey>To unload EMERGE itself: emodule unload manager confirm<reset>\n")
     return
   end
   
   -- Special handling for unloading the manager itself
   if module_id == "manager" or module_id == "emerge" then
+    -- Check for confirmation
+    if confirm ~= "confirm" then
+      cecho("<IndianRed>WARNING: This will completely remove EMERGE from Mudlet!<reset>\n")
+      cecho("<DarkOrange>You will need to reinstall using the one-line installer.<reset>\n")
+      cecho("<LightSteelBlue>To confirm, type: emodule unload manager confirm<reset>\n")
+      return
+    end
+    
     cecho("<DarkOrange>[EMERGE] Unloading module manager...<reset>\n")
-    cecho("<IndianRed>WARNING: This will remove EMERGE from Mudlet!<reset>\n")
-    cecho("<LightSteelBlue>To reinstall, use the one-line installer from GitHub<reset>\n")
     
     -- Remove persistent loader and group
     if exists("EMERGE_Loader", "script") then
@@ -723,7 +730,8 @@ function ModuleManager:createAliases()
   -- Module management commands
   self.aliases.list = tempAlias("^emodule list$", [[EMERGE:listModules()]])
   self.aliases.load = tempAlias("^emodule load (.+)$", [[EMERGE:loadModule(matches[2])]])
-  self.aliases.unload = tempAlias("^emodule unload (.+)$", [[EMERGE:unloadModule(matches[2])]])
+  self.aliases.unload = tempAlias("^emodule unload ([^ ]+)$", [[EMERGE:unloadModule(matches[2])]])
+  self.aliases.unload_confirm = tempAlias("^emodule unload ([^ ]+) (.+)$", [[EMERGE:unloadModule(matches[2], matches[3])]])
   self.aliases.github = tempAlias("^emodule github (.+)$", [[EMERGE:addGitHub(matches[2])]])
   self.aliases.add = tempAlias("^emodule add ([^ ]+) (.+)$", [[EMERGE:addModuleCommand(matches[2], matches[3])]])
   self.aliases.remove = tempAlias("^emodule remove (.+)$", [[EMERGE:removeModule(matches[2])]])
@@ -747,13 +755,17 @@ function ModuleManager:listModules()
   
   -- Show loaded modules
   cecho("<LightSteelBlue>Loaded Modules:<reset>\n")
+  
+  -- Always show the manager itself
+  cecho(string.format("  <SteelBlue>manager<reset> v%s - EMERGE Module Manager <DimGrey>(this system)<reset>\n", self.version))
+  
   if next(self.modules) then
     for id, module in pairs(self.modules) do
       cecho(string.format("  <SteelBlue>%s<reset> v%s - %s\n", 
         id, module.version or "?", module.name or "Unknown"))
     end
   else
-    cecho("  <DimGrey>None<reset>\n")
+    cecho("  <DimGrey>No additional modules loaded<reset>\n")
   end
   
   cecho("\n<LightSteelBlue>Available Modules:<reset>\n")
@@ -822,6 +834,9 @@ function ModuleManager:showHelp()
   <SteelBlue>emodule unload <id><reset>      Unload a loaded module
   <SteelBlue>emodule enable <id><reset>      Enable a module for auto-loading
   <SteelBlue>emodule disable <id><reset>     Disable a module
+  
+<LightSteelBlue>System Management:<reset>
+  <SteelBlue>emodule unload manager confirm<reset>  Completely remove EMERGE
   
 <LightSteelBlue>GitHub Integration:<reset>
   <SteelBlue>emodule github <url><reset>     Add module from GitHub repository
