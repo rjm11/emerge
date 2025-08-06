@@ -611,6 +611,9 @@ function ModuleManager:upgradeSelf()
           end
           
           if remote_version then
+            cecho(string.format("<DimGrey>[EMERGE] Current version: v%s | Remote version: v%s<reset>\n",
+              self.version, remote_version))
+            
             if remote_version ~= self.version then
               cecho(string.format("<DarkOrange>[EMERGE] Update available: v%s -> v%s<reset>\n",
                 self.version, remote_version))
@@ -623,11 +626,12 @@ function ModuleManager:upgradeSelf()
               -- Now do the upgrade
               self:doUpgrade()
             else
-              cecho("<LightSteelBlue>[EMERGE] You already have the latest version (v" .. self.version .. ")<reset>\n")
+              cecho("<LightSteelBlue>[EMERGE] You already have the latest version<reset>\n")
             end
           else
             cecho("<IndianRed>[EMERGE] Could not determine remote version from downloaded file<reset>\n")
             cecho("<DimGrey>Debug: File size = " .. #content .. " bytes<reset>\n")
+            cecho("<DimGrey>Debug: Current local version = v" .. self.version .. "<reset>\n")
           end
           
           os.remove(filename)
