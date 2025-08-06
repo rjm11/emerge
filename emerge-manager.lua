@@ -1,14 +1,14 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.6
+-- Version: 1.0.7
 
-local CURRENT_VERSION = "1.0.6"
+local CURRENT_VERSION = "1.0.7"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
 if EMERGE and EMERGE.loaded then
   if EMERGE.version ~= CURRENT_VERSION then
-    cecho(string.format("<yellow>[EMERGE] Version update: %s -> %s<reset>\n", 
+    cecho(string.format("<DarkOrange>[EMERGE] Version update: %s -> %s<reset>\n", 
       EMERGE.version, CURRENT_VERSION))
     
     -- Preserve important data
@@ -32,7 +32,7 @@ if EMERGE and EMERGE.loaded then
       end
     end)
   else
-    cecho("<yellow>[EMERGE] Already loaded.<reset>\n")
+    cecho("<DarkOrange>[EMERGE] Already loaded.<reset>\n")
     return
   end
 end
@@ -205,7 +205,7 @@ end
 -- Register a loaded module
 function ModuleManager:register(module_id, module_table)
   self.modules[module_id] = module_table
-  cecho(string.format("<green>[EMERGE] Registered: %s v%s<reset>\n", 
+  cecho(string.format("<LightSteelBlue>[EMERGE] Registered: %s v%s<reset>\n", 
     module_id, module_table.version or "unknown"))
 end
 
@@ -218,7 +218,7 @@ end
 function ModuleManager:addModule(module_id, module_info)
   self.custom_modules[module_id] = module_info
   self:saveCustomModules()
-  cecho(string.format("<green>[EMERGE] Added custom module: %s<reset>\n", module_id))
+  cecho(string.format("<LightSteelBlue>[EMERGE] Added custom module: %s<reset>\n", module_id))
 end
 
 -- Add module from GitHub URL
@@ -234,8 +234,8 @@ function ModuleManager:addGitHub(github_url)
   end
   
   if not owner or not repo then
-    cecho("<red>[EMERGE] Invalid GitHub URL format<reset>\n")
-    cecho("<yellow>Expected: owner/repo or https://github.com/owner/repo<reset>\n")
+    cecho("<IndianRed>[EMERGE] Invalid GitHub URL format<reset>\n")
+    cecho("<LightSteelBlue>Expected: owner/repo or https://github.com/owner/repo<reset>\n")
     return
   end
   
@@ -245,7 +245,7 @@ function ModuleManager:addGitHub(github_url)
   -- Generate module ID from repo name
   local module_id = repo:gsub("^mudlet%-", ""):gsub("%-module$", "")
   
-  cecho(string.format("<yellow>[EMERGE] Checking GitHub repository: %s/%s<reset>\n", owner, repo))
+  cecho(string.format("<DarkOrange>[EMERGE] Checking GitHub repository: %s/%s<reset>\n", owner, repo))
   
   -- Try common module file names
   local possible_files = {
@@ -263,8 +263,8 @@ function ModuleManager:addGitHub(github_url)
   
   try_next_file = function()
     if file_index > #possible_files then
-      cecho("<red>[EMERGE] Could not find module file in repository<reset>\n")
-      cecho("<yellow>You can manually add it with: module add " .. module_id .. " {json}<reset>\n")
+      cecho("<IndianRed>[EMERGE] Could not find module file in repository<reset>\n")
+      cecho("<LightSteelBlue>You can manually add it with: module add " .. module_id .. " {json}<reset>\n")
       return
     end
     
@@ -306,9 +306,9 @@ function ModuleManager:addGitHub(github_url)
             }
             
             self:addModule(module_id, module_info)
-            cecho(string.format("<green>[EMERGE] Successfully added module '%s' from %s/%s<reset>\n",
+            cecho(string.format("<LightSteelBlue>[EMERGE] Successfully added module '%s' from %s/%s<reset>\n",
               module_id, owner, repo))
-            cecho(string.format("<cyan>Use 'module load %s' to load it<reset>\n", module_id))
+            cecho(string.format("<SteelBlue>Use 'module load %s' to load it<reset>\n", module_id))
             
             os.remove(filename)
           else
@@ -331,9 +331,9 @@ function ModuleManager:removeModule(module_id)
   if not self.custom_modules[module_id] then
     -- Check if it exists in default registry
     if self.default_registry[module_id] then
-      cecho("<red>[EMERGE] Cannot remove default module. You can disable it instead.<reset>\n")
+      cecho("<IndianRed>[EMERGE] Cannot remove default module. You can disable it instead.<reset>\n")
     else
-      cecho("<red>[EMERGE] Module not found: " .. module_id .. "<reset>\n")
+      cecho("<IndianRed>[EMERGE] Module not found: " .. module_id .. "<reset>\n")
     end
     return
   end
@@ -353,7 +353,7 @@ function ModuleManager:removeModule(module_id)
     os.remove(cache_file)
   end
   
-  cecho(string.format("<yellow>[EMERGE] Removed module: %s<reset>\n", module_id))
+  cecho(string.format("<DarkOrange>[EMERGE] Removed module: %s<reset>\n", module_id))
 end
 
 -- Enable/disable a module
@@ -362,7 +362,7 @@ function ModuleManager:toggleModule(module_id, enabled)
   local module = modules[module_id]
   
   if not module then
-    cecho("<red>[EMERGE] Module not found: " .. module_id .. "<reset>\n")
+    cecho("<IndianRed>[EMERGE] Module not found: " .. module_id .. "<reset>\n")
     return
   end
   
@@ -379,7 +379,7 @@ function ModuleManager:toggleModule(module_id, enabled)
     self:saveCustomModules()
   end
   
-  cecho(string.format("<green>[EMERGE] Module '%s' %s<reset>\n", 
+  cecho(string.format("<LightSteelBlue>[EMERGE] Module '%s' %s<reset>\n", 
     module_id, enabled and "enabled" or "disabled"))
   
   -- If disabling and currently loaded, unload it
@@ -392,12 +392,12 @@ end
 function ModuleManager:loadModule(module_id)
   local module_info = self:getModuleList()[module_id]
   if not module_info then
-    cecho(string.format("<red>[EMERGE] Unknown module: %s<reset>\n", module_id))
+    cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
     return
   end
   
   if not module_info.github then
-    cecho(string.format("<red>[EMERGE] No GitHub info for module: %s<reset>\n", module_id))
+    cecho(string.format("<IndianRed>[EMERGE] No GitHub info for module: %s<reset>\n", module_id))
     return
   end
   
@@ -407,7 +407,7 @@ function ModuleManager:loadModule(module_id)
     module_info.github.branch or "main",
     module_info.github.file)
   
-  cecho(string.format("<yellow>[EMERGE] Downloading %s...<reset>\n", module_id))
+  cecho(string.format("<DarkOrange>[EMERGE] Downloading %s...<reset>\n", module_id))
   
   -- Add headers for private repos if token is available
   local headers = {}
@@ -424,17 +424,17 @@ function ModuleManager:loadModule(module_id)
   
   self.handlers.download = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
     if filename:find(module_id .. "%.lua$") then
-      cecho(string.format("<green>[EMERGE] Downloaded %s<reset>\n", module_id))
+      cecho(string.format("<LightSteelBlue>[EMERGE] Downloaded %s<reset>\n", module_id))
       
       -- Load the module
       local ok, err = loadfile(filename)
       if ok then
         ok, err = pcall(ok)
         if not ok then
-          cecho(string.format("<red>[EMERGE] Failed to load %s: %s<reset>\n", module_id, err))
+          cecho(string.format("<IndianRed>[EMERGE] Failed to load %s: %s<reset>\n", module_id, err))
         end
       else
-        cecho(string.format("<red>[EMERGE] Failed to parse %s: %s<reset>\n", module_id, err))
+        cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s: %s<reset>\n", module_id, err))
       end
       
       killAnonymousEventHandler(self.handlers.download)
@@ -447,23 +447,23 @@ end
 function ModuleManager:unloadModule(module_id)
   -- Special handling for unloading the manager itself
   if module_id == "manager" or module_id == "emerge" then
-    cecho("<yellow>[EMERGE] Unloading module manager...<reset>\n")
-    cecho("<red>WARNING: This will remove EMERGE from Mudlet!<reset>\n")
-    cecho("<yellow>To reinstall, use the one-line installer from GitHub<reset>\n")
+    cecho("<DarkOrange>[EMERGE] Unloading module manager...<reset>\n")
+    cecho("<IndianRed>WARNING: This will remove EMERGE from Mudlet!<reset>\n")
+    cecho("<LightSteelBlue>To reinstall, use the one-line installer from GitHub<reset>\n")
     
     -- Remove persistent loader and group
     if exists("EMERGE_Loader", "script") then
       disableScript("EMERGE_Loader")
       -- Note: There's no killScript function, scripts must be removed manually
-      cecho("<yellow>[EMERGE] Disabled persistent loader<reset>\n")
-      cecho("<yellow>To fully remove, delete the EMERGE script group in the Script Editor<reset>\n")
+      cecho("<DarkOrange>[EMERGE] Disabled persistent loader<reset>\n")
+      cecho("<LightSteelBlue>To fully remove, delete the EMERGE script group in the Script Editor<reset>\n")
     end
     
     -- Remove saved manager file
     local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
     if io.exists(manager_file) then
       os.remove(manager_file)
-      cecho("<yellow>[EMERGE] Removed saved manager file<reset>\n")
+      cecho("<DarkOrange>[EMERGE] Removed saved manager file<reset>\n")
     end
     
     -- Unload self
@@ -473,7 +473,7 @@ function ModuleManager:unloadModule(module_id)
       end
       EMERGE = nil
       ModuleManager = nil
-      cecho("<red>[EMERGE] Module manager unloaded. Goodbye!<reset>\n")
+      cecho("<IndianRed>[EMERGE] Module manager unloaded. Goodbye!<reset>\n")
     end)
     return
   end
@@ -484,15 +484,15 @@ function ModuleManager:unloadModule(module_id)
       module:unload()
     end
     self.modules[module_id] = nil
-    cecho(string.format("<yellow>[EMERGE] Unloaded: %s<reset>\n", module_id))
+    cecho(string.format("<DarkOrange>[EMERGE] Unloaded: %s<reset>\n", module_id))
   else
-    cecho(string.format("<red>[EMERGE] Module not loaded: %s<reset>\n", module_id))
+    cecho(string.format("<IndianRed>[EMERGE] Module not loaded: %s<reset>\n", module_id))
   end
 end
 
 -- Check all modules for updates
 function ModuleManager:checkAllUpdates()
-  cecho("<yellow>[EMERGE] Checking all modules for updates...<reset>\n")
+  cecho("<DarkOrange>[EMERGE] Checking all modules for updates...<reset>\n")
   
   -- Check self first
   self:checkSelfUpdate()
@@ -530,9 +530,9 @@ function ModuleManager:checkSelfUpdate()
         
         local remote_version = content:match('local CURRENT_VERSION = "([^"]+)"')
         if remote_version and remote_version ~= self.version then
-          cecho(string.format("<yellow>[EMERGE] Update available: v%s -> v%s<reset>\n",
+          cecho(string.format("<DarkOrange>[EMERGE] Update available: v%s -> v%s<reset>\n",
             self.version, remote_version))
-          cecho("<cyan>Run 'module upgrade manager' to update<reset>\n")
+          cecho("<SteelBlue>Run 'module upgrade manager' to update<reset>\n")
           
           self.pending_update = {
             version = remote_version,
@@ -540,7 +540,7 @@ function ModuleManager:checkSelfUpdate()
           }
         elseif remote_version == self.version then
           if not self.silent_check then
-            cecho("<green>[EMERGE] You have the latest version<reset>\n")
+            cecho("<LightSteelBlue>[EMERGE] You have the latest version<reset>\n")
           end
         end
       end
@@ -551,7 +551,7 @@ end
 -- Update ModuleManager
 function ModuleManager:upgradeSelf()
   if not self.pending_update then
-    cecho("<yellow>[EMERGE] No update available<reset>\n")
+    cecho("<DarkOrange>[EMERGE] No update available<reset>\n")
     return
   end
   
@@ -561,7 +561,7 @@ function ModuleManager:upgradeSelf()
     file:write(self.pending_update.content)
     file:close()
     
-    cecho(string.format("<yellow>[EMERGE] Upgrading to v%s...<reset>\n", 
+    cecho(string.format("<DarkOrange>[EMERGE] Upgrading to v%s...<reset>\n", 
       self.pending_update.version))
     
     -- Load the new version
@@ -569,10 +569,10 @@ function ModuleManager:upgradeSelf()
     if ok then
       ok, err = pcall(ok)
       if ok then
-        cecho("<green>[EMERGE] Upgrade successful!<reset>\n")
+        cecho("<LightSteelBlue>[EMERGE] Upgrade successful!<reset>\n")
         os.remove(temp_file)
       else
-        cecho(string.format("<red>[EMERGE] Upgrade failed: %s<reset>\n", err))
+        cecho(string.format("<IndianRed>[EMERGE] Upgrade failed: %s<reset>\n", err))
       end
     end
   end
@@ -604,7 +604,7 @@ function ModuleManager:updateRegistry()
         local ok, registry = pcall(yajl.to_value, content)
         if ok and registry then
           self.default_registry = registry
-          cecho("<green>[EMERGE] Module registry updated<reset>\n")
+          cecho("<LightSteelBlue>[EMERGE] Module registry updated<reset>\n")
         end
       end
     end
@@ -651,22 +651,22 @@ end
 -- Set GitHub token for private repositories
 function ModuleManager:setGitHubToken(token)
   if not token or token == "" then
-    cecho("<yellow>[EMERGE] GitHub Token Setup<reset>\n\n")
-    cecho("<yellow>To create a GitHub personal access token:<reset>\n")
+    cecho("<DarkOrange>[EMERGE] GitHub Token Setup<reset>\n\n")
+    cecho("<LightSteelBlue>To create a GitHub personal access token:<reset>\n")
     cecho("  1. Go to https://github.com/settings/tokens\n")
     cecho("  2. Click 'Generate new token (classic)'\n")
     cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
     cecho("  4. Select the 'repo' scope checkbox\n")
     cecho("  5. Click 'Generate token' at the bottom\n")
     cecho("  6. Copy the token that starts with 'ghp_'\n\n")
-    cecho("<cyan>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
+    cecho("<SteelBlue>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
     return
   end
   
   self.config.github_token = token
   self:saveConfig()
   
-  cecho("<green>[EMERGE] GitHub token saved<reset>\n")
+  cecho("<LightSteelBlue>[EMERGE] GitHub token saved<reset>\n")
   cecho("<DimGrey>You can now access private repositories<reset>\n")
 end
 
@@ -703,20 +703,20 @@ end
 
 -- List modules command
 function ModuleManager:listModules()
-  cecho("<green>==== EMERGE Module System ====<reset>\n\n")
+  cecho("<SlateGray>==== EMERGE Module System ====<reset>\n\n")
   
   -- Show loaded modules
-  cecho("<yellow>Loaded Modules:<reset>\n")
+  cecho("<LightSteelBlue>Loaded Modules:<reset>\n")
   if next(self.modules) then
     for id, module in pairs(self.modules) do
-      cecho(string.format("  <cyan>%s<reset> v%s - %s\n", 
+      cecho(string.format("  <SteelBlue>%s<reset> v%s - %s\n", 
         id, module.version or "?", module.name or "Unknown"))
     end
   else
     cecho("  <DimGrey>None<reset>\n")
   end
   
-  cecho("\n<yellow>Available Modules:<reset>\n")
+  cecho("\n<LightSteelBlue>Available Modules:<reset>\n")
   local available = self:getModuleList()
   local has_available = false
   
@@ -725,14 +725,14 @@ function ModuleManager:listModules()
   for id, info in pairs(available) do
     if not self.modules[id] and not info.added_by then
       has_available = true
-      local status = info.enabled and "<green>[enabled]<reset>" or "<red>[disabled]<reset>"
+      local status = info.enabled and "<PaleGreen>[enabled]<reset>" or "<IndianRed>[disabled]<reset>"
       local flags = ""
       if info.required then
-        flags = " <red>[REQUIRED]<reset>"
+        flags = " <IndianRed>[REQUIRED]<reset>"
       elseif info.recommended then
-        flags = " <yellow>[RECOMMENDED]<reset>"
+        flags = " <LightSteelBlue>[RECOMMENDED]<reset>"
       end
-      cecho(string.format("    <cyan>%s<reset> - %s %s%s\n", id, info.name, status, flags))
+      cecho(string.format("    <SteelBlue>%s<reset> - %s %s%s\n", id, info.name, status, flags))
     end
   end
   
@@ -745,9 +745,9 @@ function ModuleManager:listModules()
         has_custom = true
       end
       has_available = true
-      local status = info.enabled and "<green>[enabled]<reset>" or "<red>[disabled]<reset>"
+      local status = info.enabled and "<PaleGreen>[enabled]<reset>" or "<IndianRed>[disabled]<reset>"
       local source = string.format("<DimGrey>(%s/%s)<reset>", info.github.owner, info.github.repo)
-      cecho(string.format("    <cyan>%s<reset> - %s %s %s\n", id, info.name, status, source))
+      cecho(string.format("    <SteelBlue>%s<reset> - %s %s %s\n", id, info.name, status, source))
     end
   end
   
@@ -760,11 +760,11 @@ end
 
 -- Show configuration
 function ModuleManager:showConfig()
-  cecho("<green>==== Module Manager Configuration ====<reset>\n\n")
-  cecho(string.format("Auto-update: %s\n", self.config.auto_update and "<green>ON<reset>" or "<red>OFF<reset>"))
-  cecho(string.format("Auto-load modules: %s\n", self.config.auto_load_modules and "<green>ON<reset>" or "<red>OFF<reset>"))
+  cecho("<SlateGray>==== Module Manager Configuration ====<reset>\n\n")
+  cecho(string.format("Auto-update: %s\n", self.config.auto_update and "<PaleGreen>ON<reset>" or "<IndianRed>OFF<reset>"))
+  cecho(string.format("Auto-load modules: %s\n", self.config.auto_load_modules and "<PaleGreen>ON<reset>" or "<IndianRed>OFF<reset>"))
   cecho(string.format("Update interval: %d seconds\n", self.config.update_interval))
-  cecho(string.format("Debug mode: %s\n", self.config.debug and "<yellow>ON<reset>" or "OFF"))
+  cecho(string.format("Debug mode: %s\n", self.config.debug and "<LightSteelBlue>ON<reset>" or "OFF"))
   cecho(string.format("\nCustom modules: %d\n", table.size(self.custom_modules)))
   cecho(string.format("Config location: %s\n", self.paths.config))
 end
@@ -772,31 +772,31 @@ end
 -- Show help
 function ModuleManager:showHelp()
   cecho([[
-<green>==== EMERGE Module System ====<reset>
+<SlateGray>==== EMERGE Module System ====<reset>
 <DimGrey>Emergent Modular Engagement & Response Generation Engine<reset>
 
-<yellow>Core Commands:<reset>
-  <cyan>emodule list<reset>             List all modules (loaded & available)
-  <cyan>emodule load <id><reset>        Download and load a module
-  <cyan>emodule unload <id><reset>      Unload a loaded module
-  <cyan>emodule enable <id><reset>      Enable a module for auto-loading
-  <cyan>emodule disable <id><reset>     Disable a module
+<LightSteelBlue>Core Commands:<reset>
+  <SteelBlue>emodule list<reset>             List all modules (loaded & available)
+  <SteelBlue>emodule load <id><reset>        Download and load a module
+  <SteelBlue>emodule unload <id><reset>      Unload a loaded module
+  <SteelBlue>emodule enable <id><reset>      Enable a module for auto-loading
+  <SteelBlue>emodule disable <id><reset>     Disable a module
   
-<yellow>GitHub Integration:<reset>
-  <cyan>emodule github <url><reset>     Add module from GitHub repository
-  <cyan>emodule remove <id><reset>      Remove a custom module
-  <cyan>emodule token <token><reset>    Set GitHub token for private repos
+<LightSteelBlue>GitHub Integration:<reset>
+  <SteelBlue>emodule github <url><reset>     Add module from GitHub repository
+  <SteelBlue>emodule remove <id><reset>      Remove a custom module
+  <SteelBlue>emodule token <token><reset>    Set GitHub token for private repos
   
-<yellow>Update Commands:<reset>
-  <cyan>emodule update<reset>           Check all modules for updates
-  <cyan>emodule upgrade<reset>          Upgrade EMERGE manager itself
-  <cyan>emodule update registry<reset>  Update the module registry
+<LightSteelBlue>Update Commands:<reset>
+  <SteelBlue>emodule update<reset>           Check all modules for updates
+  <SteelBlue>emodule upgrade<reset>          Upgrade EMERGE manager itself
+  <SteelBlue>emodule update registry<reset>  Update the module registry
   
-<yellow>Other Commands:<reset>
-  <cyan>emodule config<reset>           Show current configuration
-  <cyan>emodule help<reset>             Show this help (or just 'emodule')
+<LightSteelBlue>Other Commands:<reset>
+  <SteelBlue>emodule config<reset>           Show current configuration
+  <SteelBlue>emodule help<reset>             Show this help (or just 'emodule')
 
-<yellow>Examples:<reset>
+<LightSteelBlue>Examples:<reset>
   <DimGrey>Add from GitHub:<reset>
   emodule github rjm11/mudlet-combat-module
   emodule github https://github.com/user/repo
@@ -817,7 +817,7 @@ function ModuleManager:addModuleCommand(id, json_str)
   if ok and module_info then
     self:addModule(id, module_info)
   else
-    cecho("<red>[EMERGE] Invalid JSON format<reset>\n")
+    cecho("<IndianRed>[EMERGE] Invalid JSON format<reset>\n")
   end
 end
 
@@ -826,18 +826,18 @@ function ModuleManager:showBootup()
   -- Clear some space
   echo("\n\n")
   
-  -- EMERGE ASCII art
-  cecho([[<green>
-    ███████╗███╗   ███╗███████╗██████╗  ██████╗ ███████╗
-    ██╔════╝████╗ ████║██╔════╝██╔══██╗██╔════╝ ██╔════╝
-    █████╗  ██╔████╔██║█████╗  ██████╔╝██║  ███╗█████╗  
-    ██╔══╝  ██║╚██╔╝██║██╔══╝  ██╔══██╗██║   ██║██╔══╝  
-    ███████╗██║ ╚═╝ ██║███████╗██║  ██║╚██████╔╝███████╗
-    ╚══════╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝<reset>
+  -- EMERGE ASCII art with modern gradient
+  cecho([[
+    <DimGray>███████╗███╗   ███╗███████╗██████╗  ██████╗ ███████╗<reset>
+    <DimGray>██╔════╝████╗ ████║██╔════╝██╔══██╗██╔════╝ ██╔════╝<reset>
+    <SlateGray>█████╗  ██╔████╔██║█████╗  ██████╔╝██║  ███╗█████╗<reset>  
+    <SlateGray>██╔══╝  ██║╚██╔╝██║██╔══╝  ██╔══██╗██║   ██║██╔══╝<reset>  
+    <LightSlateGray>███████╗██║ ╚═╝ ██║███████╗██║  ██║╚██████╔╝███████╗<reset>
+    <LightSlateGray>╚══════╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝<reset>
 ]])
   
-  cecho("<yellow>    Emergent Modular Engagement & Response Generation Engine<reset>\n")
-  cecho(string.format("<DimGrey>    Version %s | Event-Driven Architecture<reset>\n\n", self.version))
+  cecho("<LightSteelBlue>    Emergent Modular Engagement & Response Generation Engine<reset>\n")
+  cecho(string.format("<DimGray>    Version %s | Event-Driven Architecture<reset>\n\n", self.version))
   
   -- Bootup sequence
   local steps = {
@@ -845,7 +845,7 @@ function ModuleManager:showBootup()
     {delay = 0.4, msg = "<DimGrey>[BOOT]<reset> Loading configuration from " .. self.paths.config:match("/([^/]+)$")},
     {delay = 0.6, msg = "<DimGrey>[BOOT]<reset> Verifying module registry..."},
     {delay = 0.8, msg = "<DimGrey>[BOOT]<reset> Establishing event system..."},
-    {delay = 1.0, msg = "<green>[BOOT] System ready<reset>"},
+    {delay = 1.0, msg = "<LightSteelBlue>[BOOT] System ready<reset>"},
   }
   
   for i, step in ipairs(steps) do
@@ -883,49 +883,49 @@ function ModuleManager:checkCoreModules()
   local gmcp_missing = not self.modules["gmcp"]
   
   if core_missing or gmcp_missing then
-    cecho("<yellow>==== Module Setup Required ====<reset>\n\n")
+    cecho("<DarkOrange>==== Module Setup Required ====<reset>\n\n")
     
     -- Check if token is set
     if not self.config.github_token then
-      cecho("<red>IMPORTANT: GitHub Token Required<reset>\n")
+      cecho("<IndianRed>IMPORTANT: GitHub Token Required<reset>\n")
       cecho("The EMERGE modules are hosted in a private repository.\n")
       cecho("You need a GitHub personal access token to download them.\n\n")
       
-      cecho("<yellow>Step 1: Create a GitHub Token<reset>\n")
+      cecho("<LightSteelBlue>Step 1: Create a GitHub Token<reset>\n")
       cecho("  1. Go to https://github.com/settings/tokens\n")
       cecho("  2. Click 'Generate new token (classic)'\n")
       cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
       cecho("  4. Select the 'repo' scope\n")
       cecho("  5. Click 'Generate token' and copy it\n\n")
       
-      cecho("<yellow>Step 2: Set Your Token<reset>\n")
-      cecho("  <cyan>emodule token YOUR_TOKEN_HERE<reset>\n\n")
+      cecho("<LightSteelBlue>Step 2: Set Your Token<reset>\n")
+      cecho("  <SteelBlue>emodule token YOUR_TOKEN_HERE<reset>\n\n")
       
-      cecho("<yellow>Step 3: Load Core Modules<reset>\n")
-      cecho("  <cyan>emodule load core<reset> - Required event system\n")
-      cecho("  <cyan>emodule load gmcp<reset> - Game data handler\n\n")
+      cecho("<LightSteelBlue>Step 3: Load Core Modules<reset>\n")
+      cecho("  <SteelBlue>emodule load core<reset> - Required event system\n")
+      cecho("  <SteelBlue>emodule load gmcp<reset> - Game data handler\n\n")
       
       cecho("<DimGrey>Need help? Visit: https://github.com/rjm11/emerge/wiki<reset>\n")
     else
       -- Token is set, show regular missing module messages
       if core_missing then
-        cecho("<red>MISSING: EMERGE Core Module (REQUIRED)<reset>\n")
+        cecho("<IndianRed>MISSING: EMERGE Core Module (REQUIRED)<reset>\n")
         cecho("The core module provides the event system that all other modules depend on.\n")
-        cecho("<cyan>To install: emodule load core<reset>\n\n")
+        cecho("<SteelBlue>To install: emodule load core<reset>\n\n")
       end
       
       if gmcp_missing then
-        cecho("<yellow>MISSING: GMCP Handler Module (Highly Recommended)<reset>\n")
+        cecho("<LightSteelBlue>MISSING: GMCP Handler Module (Highly Recommended)<reset>\n")
         cecho("GMCP provides vital game data that most modules need to function properly.\n")
-        cecho("<cyan>To install: emodule load gmcp<reset>\n\n")
+        cecho("<SteelBlue>To install: emodule load gmcp<reset>\n\n")
       end
       
       cecho("<DimGrey>After installing core modules, run 'emodule list' to see available modules<reset>\n")
       cecho("<DimGrey>Visit the wiki for more information: https://github.com/rjm11/emerge/wiki<reset>\n")
     end
   else
-    cecho("<green>✓ Core modules loaded successfully<reset>\n\n")
-    cecho("<cyan>Quick Commands:<reset>\n")
+    cecho("<LightSteelBlue>✓ Core modules loaded successfully<reset>\n\n")
+    cecho("<SteelBlue>Quick Commands:<reset>\n")
     cecho("  emodule list    - See all available modules\n")
     cecho("  emodule help    - View all commands\n")
     cecho("  emodule github  - Add modules from GitHub\n\n")
@@ -998,11 +998,11 @@ function ModuleManager:createPersistentLoader()
     return
   end
   
-  cecho("<yellow>[EMERGE] Creating persistent loader...<reset>\n")
+  cecho("<DarkOrange>[EMERGE] Creating persistent loader...<reset>\n")
   
   -- Create a script group first
   local group_id = permScript("EMERGE", "", "")
-  cecho("<green>[EMERGE] Created script group (ID: " .. tostring(group_id) .. ")<reset>\n")
+  cecho("<LightSteelBlue>[EMERGE] Created script group (ID: " .. tostring(group_id) .. ")<reset>\n")
   
   -- Create the loader script inside the group
   local script_id = permScript("EMERGE_Loader", "EMERGE", [[
@@ -1010,13 +1010,13 @@ function ModuleManager:createPersistentLoader()
 dofile(getMudletHomeDir() .. "/emerge-manager.lua")
 ]])
   
-  cecho("<green>[EMERGE] Created loader script (ID: " .. tostring(script_id) .. ")<reset>\n")
+  cecho("<LightSteelBlue>[EMERGE] Created loader script (ID: " .. tostring(script_id) .. ")<reset>\n")
   
   -- Enable the script
   enableScript("EMERGE_Loader")
-  cecho("<green>[EMERGE] Enabled loader script<reset>\n")
+  cecho("<LightSteelBlue>[EMERGE] Enabled loader script<reset>\n")
   
-  cecho("<green>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
+  cecho("<LightSteelBlue>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
   cecho("<DimGrey>EMERGE will now load automatically on Mudlet startup<reset>\n")
   
   -- Also save the manager file to Mudlet home
@@ -1034,7 +1034,7 @@ dofile(getMudletHomeDir() .. "/emerge-manager.lua")
       if out then
         out:write(content)
         out:close()
-        cecho("<green>[EMERGE] Created persistent copy of manager<reset>\n")
+        cecho("<LightSteelBlue>[EMERGE] Created persistent copy of manager<reset>\n")
       end
     end
   end
