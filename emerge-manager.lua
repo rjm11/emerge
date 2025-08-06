@@ -488,10 +488,19 @@ function ModuleManager:unloadModule(module_id, confirm)
     -- Remove persistent loader and group
     if exists("EMERGE Module Bootloader", "script") then
       disableScript("EMERGE Module Bootloader")
-      -- Note: There's no killScript function, scripts must be removed manually
-      cecho("<DarkOrange>[EMERGE] Disabled persistent bootloader<reset>\n")
-      cecho("<LightSteelBlue>To fully remove, delete the 'EMERGE' folder in the Script Editor<reset>\n")
+      killScript("EMERGE Module Bootloader")
+      cecho("<DarkOrange>[EMERGE] Removed persistent bootloader<reset>\n")
     end
+    
+    -- Try to remove the group as well
+    if exists("EMERGE", "script") then
+      killScript("EMERGE")
+      cecho("<DarkOrange>[EMERGE] Removed EMERGE script group<reset>\n")
+    end
+    
+    -- Save profile to persist the removal
+    saveProfile()
+    cecho("<DarkOrange>[EMERGE] Profile saved - removal is permanent<reset>\n")
     
     -- Remove saved manager file
     local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
@@ -1106,6 +1115,10 @@ end
     cecho("<LightSteelBlue>[EMERGE] Enabled bootloader script<reset>\n")
     
     cecho("<LightSteelBlue>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
+    
+    -- Save the profile to make the changes permanent
+    saveProfile()
+    cecho("<green>[EMERGE] Profile saved - bootloader is now permanent<reset>\n")
     cecho("<DimGrey>EMERGE will now load automatically on Mudlet startup<reset>\n")
   else
     cecho("<IndianRed>[EMERGE] Failed to create bootloader script<reset>\n")
@@ -1115,9 +1128,30 @@ end
 -- Auto-initialize
 ModuleManager:init()
 
--- Create persistent loader after a short delay to ensure Mudlet is ready
-tempTimer(0.5, function()
-  if ModuleManager then
-    ModuleManager:createPersistentLoader()
+-- Create persistent loader immediately
+-- This ensures it gets created even on first install
+ModuleManager:createPersistentLoader()
+
+-- Also save the current script content to the expected location
+-- This ensures the file exists for the bootloader to use
+local current_source = debug.getinfo(1, "S").source
+if current_source and current_source:sub(1,1) == "@" then
+  -- Source is a file (not a string)
+  local source_file = current_source:sub(2)
+  local target_file = getMudletHomeDir() .. "/emerge-manager.lua"
+  
+  -- If we're not already at the target location, copy ourselves there
+  if source_file ~= target_file and io.exists(source_file) then
+    local f = io.open(source_file, "r")
+    if f then
+      local content = f:read("*all")
+      f:close()
+      
+      local out = io.open(target_file, "w")
+      if out then
+        out:write(content)
+        out:close()
+      end
+    end
   end
-end)
+end
