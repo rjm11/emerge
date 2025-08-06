@@ -1,0 +1,21 @@
+-- TEST 1: Basic echo test
+-- Copy and paste this first to make sure Mudlet is executing commands:
+
+lua cecho("<yellow>TEST: Basic echo working<reset>\n")
+
+
+-- TEST 2: Download test
+-- If Test 1 works, try this to test downloading:
+
+lua cecho("<yellow>TEST: Starting download...<reset>\n") downloadFile(getMudletHomeDir().."/test.txt", "https://raw.githubusercontent.com/rjm11/emerge/main/README.md") registerAnonymousEventHandler("sysDownloadDone", function(e,p) if p:find("test%.txt$") then cecho("<green>TEST: Download successful!<reset>\n") os.remove(p) end end, true) registerAnonymousEventHandler("sysDownloadError", function(e,p) if p:find("test%.txt$") then cecho("<red>TEST: Download failed<reset>\n") end end, true)
+
+
+-- TEST 3: Simplified installer (one line)
+-- If Test 2 works, try this simplified version:
+
+lua local f=getMudletHomeDir().."/emerge-manager.lua"; cecho("<yellow>Downloading EMERGE...<reset>\n"); downloadFile(f,"https://raw.githubusercontent.com/rjm11/emerge/main/emerge-manager.lua"); registerAnonymousEventHandler("sysDownloadDone",function(e,p) if p==f then cecho("<green>Downloaded! Loading...<reset>\n"); dofile(p) end end,true)
+
+
+-- TEST 4: Ultra-simple direct load (if you have the file already):
+
+lua dofile(getMudletHomeDir().."/emerge-manager.lua")
