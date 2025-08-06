@@ -753,6 +753,7 @@ function ModuleManager:createAliases()
   self.aliases.help = tempAlias("^emodule help$", [[EMERGE:showHelp()]])
   self.aliases.help_short = tempAlias("^emodule$", [[EMERGE:showHelp()]])
   self.aliases.install = tempAlias("^emodule install$", [[EMERGE:manualInstall()]])
+  self.aliases.status = tempAlias("^emodule status$", [[EMERGE:checkStatus()]])
 end
 
 -- List modules command
@@ -1069,10 +1070,16 @@ end
 
 -- Create persistent loader
 function ModuleManager:createPersistentLoader(forceCreate)
-  cecho("<yellow>[EMERGE DEBUG] createPersistentLoader called<reset>\n")
+  cecho("<yellow>[EMERGE DEBUG] createPersistentLoader called (force=" .. tostring(forceCreate) .. ")<reset>\n")
   
-  -- Check if we already have a loader script
-  if not forceCreate and exists("EMERGE Module Bootloader", "script") then
+  -- If force create, try to remove existing first
+  if forceCreate and exists("EMERGE Module Bootloader", "script") then
+    cecho("<yellow>[EMERGE] Removing existing bootloader to recreate...<reset>\n")
+    pcall(function()
+      disableScript("EMERGE Module Bootloader")
+      killScript("EMERGE Module Bootloader")
+    end)
+  elseif not forceCreate and exists("EMERGE Module Bootloader", "script") then
     cecho("<DimGrey>[EMERGE] Bootloader already exists<reset>\n")
     return
   end
@@ -1192,21 +1199,79 @@ function ModuleManager:manualInstall()
   cecho("<LightSteelBlue>8. Save your profile (Ctrl+S or File → Save Profile)<reset>\n")
 end
 
+-- Check installation status
+function ModuleManager:checkStatus()
+  cecho("<SlateGray>==== EMERGE Installation Status ====<reset>\n\n")
+  
+  -- Check if manager file exists
+  local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
+  if io.exists(manager_file) then
+    cecho("<green>✓ Manager file exists<reset>\n")
+    cecho("  <DimGrey>Location: " .. manager_file .. "<reset>\n")
+  else
+    cecho("<red>✗ Manager file missing<reset>\n")
+    cecho("  <DimGrey>Expected at: " .. manager_file .. "<reset>\n")
+  end
+  
+  -- Check if bootloader exists
+  if exists("EMERGE Module Bootloader", "script") then
+    cecho("<yellow>⚠ Bootloader detected (may be temporary)<reset>\n")
+    cecho("  <DimGrey>Check Script Editor (Alt+E) to verify it's saved<reset>\n")
+  else
+    cecho("<red>✗ Bootloader not found<reset>\n")
+  end
+  
+  -- Check if EMERGE is loaded
+  if EMERGE and EMERGE.loaded then
+    cecho("<green>✓ EMERGE is currently loaded<reset>\n")
+    cecho("  <DimGrey>Version: " .. (EMERGE.version or "unknown") .. "<reset>\n")
+  else
+    cecho("<red>✗ EMERGE not loaded<reset>\n")
+  end
+  
+  cecho("\n<LightSteelBlue>To ensure persistence:<reset>\n")
+  cecho("1. Type: <yellow>emodule install<reset>\n")
+  cecho("2. Open Script Editor (Alt+E) and verify 'EMERGE' group exists\n")
+  cecho("3. Save your profile (Ctrl+S)\n")
+  cecho("4. Restart Mudlet to test persistence\n")
+end
+
 -- Auto-initialize
 ModuleManager:init()
 
--- Try to create persistent loader, but wrap in pcall to handle any API issues
-cecho("<yellow>[EMERGE] Attempting to set up persistence...<reset>\n")
-local ok, err = pcall(function()
-  ModuleManager:createPersistentLoader()
-end)
+-- Try to create persistent loader
+-- ALWAYS force-create on first load to ensure it's properly saved
+cecho("<yellow>[EMERGE] Setting up persistence...<reset>\n")
 
-if not ok then
-  cecho("<red>[EMERGE] Auto-install failed: " .. tostring(err) .. "<reset>\n")
-  cecho("<yellow>[EMERGE] Type 'emodule install' to try manual installation<reset>\n")
-  cecho("<yellow>[EMERGE] Or follow these steps:<reset>\n")
-  cecho("<LightSteelBlue>1. Open Script Editor (Alt+E)<reset>\n")
-  cecho("<LightSteelBlue>2. Create a script group named 'EMERGE'<reset>\n")
-  cecho("<LightSteelBlue>3. Add a script with: dofile(getMudletHomeDir()..'/emerge-manager.lua')<reset>\n")
-  cecho("<LightSteelBlue>4. Save your profile (Ctrl+S)<reset>\n")
+-- Check if this is likely a fresh install (no existing bootloader in Script Editor)
+local needs_install = true
+if exists("EMERGE Module Bootloader", "script") then
+  -- The script might exist temporarily but not be saved
+  -- Force reinstall if we're running from the downloaded file
+  local current_file = getMudletHomeDir() .. "/emerge-manager.lua"
+  if io.exists(current_file) then
+    cecho("<yellow>[EMERGE] Verifying bootloader persistence...<reset>\n")
+    -- Still try to create it to ensure it's saved
+    needs_install = true
+  else
+    needs_install = false
+  end
+end
+
+if needs_install then
+  local ok, err = pcall(function()
+    ModuleManager:createPersistentLoader(true) -- Force create
+  end)
+  
+  if not ok then
+    cecho("<red>[EMERGE] Auto-install failed: " .. tostring(err) .. "<reset>\n")
+    cecho("<yellow>[EMERGE] Type 'emodule install' to try manual installation<reset>\n")
+    cecho("<yellow>[EMERGE] Or follow these steps:<reset>\n")
+    cecho("<LightSteelBlue>1. Open Script Editor (Alt+E)<reset>\n")
+    cecho("<LightSteelBlue>2. Create a script group named 'EMERGE'<reset>\n")
+    cecho("<LightSteelBlue>3. Add a script with: dofile(getMudletHomeDir()..'/emerge-manager.lua')<reset>\n")
+    cecho("<LightSteelBlue>4. Save your profile (Ctrl+S)<reset>\n")
+  end
+else
+  cecho("<DimGrey>[EMERGE] Bootloader verified<reset>\n")
 end
