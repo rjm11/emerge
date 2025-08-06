@@ -803,7 +803,13 @@ function ModuleManager:createAliases()
   self.aliases.load = tempAlias("^emodule load (.+)$", [[EMERGE:loadModule(matches[2])]])
   self.aliases.unload = tempAlias("^emodule unload ([^ ]+)$", [[EMERGE:unloadModule(matches[2])]])
   self.aliases.unload_confirm = tempAlias("^emodule unload ([^ ]+) (.+)$", [[EMERGE:unloadModule(matches[2], matches[3])]])
-  self.aliases.github = tempAlias("^emodule github (.+)$", [[EMERGE:addGitHub(matches[2])]])
+  self.aliases.github = tempAlias("^emodule github (.+)$", [[
+    if matches[2] == "help" then
+      EMERGE:showGitHubHelp()
+    else
+      EMERGE:addGitHub(matches[2])
+    end
+  ]])
   self.aliases.add = tempAlias("^emodule add ([^ ]+) (.+)$", [[EMERGE:addModuleCommand(matches[2], matches[3])]])
   self.aliases.remove = tempAlias("^emodule remove (.+)$", [[EMERGE:removeModule(matches[2])]])
   self.aliases.enable = tempAlias("^emodule enable (.+)$", [[EMERGE:toggleModule(matches[2], true)]])
@@ -885,6 +891,49 @@ function ModuleManager:showConfig()
   cecho(string.format("Debug mode: %s\n", self.config.debug and "<LightSteelBlue>ON<reset>" or "OFF"))
   cecho(string.format("\nCustom modules: %d\n", table.size(self.custom_modules)))
   cecho(string.format("Config location: %s\n", self.paths.config))
+end
+
+-- Show GitHub setup help
+function ModuleManager:showGitHubHelp()
+  cecho([[
+<SlateGray>==== GitHub Integration Setup Guide ====<reset>
+
+<LightSteelBlue>Step 1: Create a GitHub Personal Access Token<reset>
+  1. Go to: ]])
+  cechoLink("github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open")
+  cecho([[
+
+  2. Click <SteelBlue>"Generate new token"<reset> → <SteelBlue>"Generate new token (classic)"<reset>
+  3. Give it a name like <DimGrey>"Mudlet EMERGE Access"<reset>
+  4. Set expiration (recommended: <SteelBlue>90 days<reset> or <SteelBlue>No expiration<reset>)
+  5. Select scopes:
+     ✓ <SteelBlue>repo<reset> (Full control of private repositories)
+       - Needed to access private module repositories
+  6. Click <SteelBlue>"Generate token"<reset> at the bottom
+  7. <yellow>IMPORTANT: Copy the token NOW - you won't see it again!<reset>
+     Token looks like: <DimGrey>ghp_xxxxxxxxxxxxxxxxxxxx<reset>
+
+<LightSteelBlue>Step 2: Add Token to EMERGE<reset>
+  Run: <SteelBlue>emodule token <your_token_here><reset>
+  Example: <DimGrey>emodule token ghp_1234567890abcdef<reset>
+
+<LightSteelBlue>Step 3: Add Modules<reset>
+  Public repos:  <SteelBlue>emodule github owner/repository<reset>
+  Private repos: <SteelBlue>emodule github owner/private-repo<reset>
+  
+<LightSteelBlue>Security Notes:<reset>
+  • Your token is stored locally in: <DimGrey>emerge-config.json<reset>
+  • Never share your token with others
+  • Tokens can be revoked anytime on GitHub
+  • Use separate tokens for different applications
+
+<LightSteelBlue>Troubleshooting:<reset>
+  • <DimGrey>"404 Not Found"<reset> - Check repo name or token permissions
+  • <DimGrey>"401 Unauthorized"<reset> - Token may be expired or invalid
+  • <DimGrey>"Rate limit"<reset> - Wait an hour or use a token (increases limits)
+
+<DimGrey>Type 'emodule help' for all commands<reset>
+]])
 end
 
 -- Show help
@@ -1025,8 +1074,11 @@ function ModuleManager:checkCoreModules()
   -- Check if token is set
   if not self.config.github_token or self.config.github_token == "" then
     cecho("<yellow>First-time setup:<reset>\n")
-    cecho("  <DimGrey>1. Get a GitHub token from: github.com/settings/tokens<reset>\n")
-    cecho("  <DimGrey>2. Set your token: <SteelBlue>emodule token <token><reset>\n\n")
+    cecho("  <DimGrey>1. Get a GitHub token from: ")
+    cechoLink("github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open GitHub tokens page")
+    cecho("<reset>\n")
+    cecho("  <DimGrey>2. Set your token: <SteelBlue>emodule token <token><reset>\n")
+    cecho("  <DimGrey>3. Need help? <SteelBlue>emodule github help<reset>\n\n")
     cecho("<DimGrey>Then add modules:<reset>\n")
   else
     cecho("<DimGrey>Add modules from GitHub:<reset>\n")
