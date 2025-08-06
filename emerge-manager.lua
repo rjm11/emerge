@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.3
+-- Version: 1.1.4
 
-local CURRENT_VERSION = "1.1.3"
+local CURRENT_VERSION = "1.1.4"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
