@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.4
+-- Version: 0.5.5
 
-local CURRENT_VERSION = "0.5.4"
+local CURRENT_VERSION = "0.5.5"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1154,15 +1154,34 @@ function ModuleManager:createPersistentLoader(forceCreate)
   -- Set flag to prevent duplicate loading during installation
   EMERGE.creating_bootloader = true
   
-  -- If force create, try to remove existing first
-  if forceCreate and exists("EMERGE Module Bootloader", "script") then
-    pcall(function()
-      disableScript("EMERGE Module Bootloader")
-      killScript("EMERGE Module Bootloader")
-    end)
-  elseif not forceCreate and exists("EMERGE Module Bootloader", "script") then
+  -- Check if both group and script already exist
+  local groupExists = exists("EMERGE", "script") > 0
+  local scriptExists = exists("EMERGE Module Bootloader", "script") > 0
+  
+  -- If both exist and we're not forcing, we're done
+  if groupExists and scriptExists and not forceCreate then
+    cecho("<DimGrey>• Persistence layer already exists<reset>\n")
+    enableScript("EMERGE")
+    enableScript("EMERGE Module Bootloader")
     EMERGE.creating_bootloader = false
     return
+  end
+  
+  -- If forcing, try to clean up existing items first
+  if forceCreate then
+    if scriptExists then
+      pcall(function()
+        disableScript("EMERGE Module Bootloader")
+        killScript("EMERGE Module Bootloader")
+      end)
+    end
+    if groupExists then
+      pcall(function()
+        disableScript("EMERGE")
+        -- Note: Mudlet doesn't have killGroup, so we can't remove the group
+        -- But at least we won't create duplicates
+      end)
+    end
   end
   
   cecho("<DimGrey>• Setting up persistence layer...<reset>\n")
@@ -1192,14 +1211,26 @@ end, true)
     end
   end
   
-  -- Create a script group/folder first
-  local group_id = permGroup("EMERGE", "script")
+  -- Only create the group if it doesn't exist
+  if not groupExists then
+    local group_id = permGroup("EMERGE", "script")
+    if not group_id then
+      cecho("<red>[EMERGE] Failed to create script group<reset>\n")
+      EMERGE.creating_bootloader = false
+      return
+    end
+    cecho("<DimGrey>• Created EMERGE group<reset>\n")
+  else
+    cecho("<DimGrey>• EMERGE group already exists<reset>\n")
+  end
   
   -- Enable the group to ensure it's checked in Script Editor
   enableScript("EMERGE")
   
-  -- Create the loader script inside the EMERGE group
-  local script_code = [[
+  -- Only create the script if it doesn't exist
+  if not scriptExists then
+    -- Create the loader script inside the EMERGE group
+    local script_code = [[
 -- EMERGE Module Bootloader
 -- This script loads the EMERGE module system on Mudlet startup
 
@@ -1218,8 +1249,16 @@ else
   cecho("<IndianRed>[EMERGE] Manager file not found. Please reinstall EMERGE.<reset>\n")
 end
 ]]
+    
+    local script_id = permScript("EMERGE Module Bootloader", "EMERGE", script_code)
+    cecho("<DimGrey>• Created bootloader script<reset>\n")
+  else
+    cecho("<DimGrey>• Bootloader script already exists<reset>\n")
+    local script_id = true  -- Set to true so the following if block still works
+  end
   
-  local script_id = permScript("EMERGE Module Bootloader", "EMERGE", script_code)
+  -- Only enable and save if we have a valid script
+  local script_id = exists("EMERGE Module Bootloader", "script") > 0
   
   if script_id then
     -- Enable the script to ensure it's checked in Script Editor
@@ -1310,7 +1349,7 @@ if not EMERGE_BOOTLOADER_ACTIVE then
   EMERGE.installing = true  -- Set flag to suppress "already loaded" message
   
   local ok, err = pcall(function()
-    ModuleManager:createPersistentLoader(true)
+    ModuleManager:createPersistentLoader(false)  -- Don't force - prevent duplicates
   end)
   
   EMERGE.installing = false  -- Clear flag
