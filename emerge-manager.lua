@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.2
+-- Version: 1.1.3
 
-local CURRENT_VERSION = "1.1.2"
+local CURRENT_VERSION = "1.1.3"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -486,11 +486,11 @@ function ModuleManager:unloadModule(module_id, confirm)
     cecho("<DarkOrange>[EMERGE] Unloading module manager...<reset>\n")
     
     -- Remove persistent loader and group
-    if exists("EMERGE_Loader", "script") then
-      disableScript("EMERGE_Loader")
+    if exists("EMERGE Module Bootloader", "script") then
+      disableScript("EMERGE Module Bootloader")
       -- Note: There's no killScript function, scripts must be removed manually
-      cecho("<DarkOrange>[EMERGE] Disabled persistent loader<reset>\n")
-      cecho("<LightSteelBlue>To fully remove, delete the EMERGE script group in the Script Editor<reset>\n")
+      cecho("<DarkOrange>[EMERGE] Disabled persistent bootloader<reset>\n")
+      cecho("<LightSteelBlue>To fully remove, delete the 'EMERGE' folder in the Script Editor<reset>\n")
     end
     
     -- Remove saved manager file
@@ -1060,28 +1060,29 @@ end
 -- Create persistent loader
 function ModuleManager:createPersistentLoader()
   -- Check if we already have a loader script
-  if exists("EMERGE_Loader", "script") then
+  if exists("EMERGE Module Bootloader", "script") then
     -- Silently return if it already exists
     return
   end
   
   cecho("<DarkOrange>[EMERGE] Creating persistent loader...<reset>\n")
   
-  -- Create a script group first
-  local group_id = permScript("EMERGE", "", "")
-  cecho("<LightSteelBlue>[EMERGE] Created script group (ID: " .. tostring(group_id) .. ")<reset>\n")
+  -- Create a script group/folder first
+  local group_id = permGroup("EMERGE", "script")
+  cecho("<LightSteelBlue>[EMERGE] Created script group 'EMERGE' (ID: " .. tostring(group_id) .. ")<reset>\n")
   
-  -- Create the loader script inside the group
-  local script_id = permScript("EMERGE_Loader", "EMERGE", [[
--- EMERGE Loader
+  -- Create the loader script inside the EMERGE group
+  local script_id = permScript("EMERGE Module Bootloader", "EMERGE", [[
+-- EMERGE Module Bootloader
+-- This script loads the EMERGE module system on Mudlet startup
 dofile(getMudletHomeDir() .. "/emerge-manager.lua")
 ]])
   
-  cecho("<LightSteelBlue>[EMERGE] Created loader script (ID: " .. tostring(script_id) .. ")<reset>\n")
+  cecho("<LightSteelBlue>[EMERGE] Created bootloader script (ID: " .. tostring(script_id) .. ")<reset>\n")
   
   -- Enable the script
-  enableScript("EMERGE_Loader")
-  cecho("<LightSteelBlue>[EMERGE] Enabled loader script<reset>\n")
+  enableScript("EMERGE Module Bootloader")
+  cecho("<LightSteelBlue>[EMERGE] Enabled bootloader script<reset>\n")
   
   cecho("<LightSteelBlue>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
   cecho("<DimGrey>EMERGE will now load automatically on Mudlet startup<reset>\n")
