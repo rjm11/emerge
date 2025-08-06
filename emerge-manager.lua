@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.2
+-- Version: 1.0.3
 
-local CURRENT_VERSION = "1.0.2"
+local CURRENT_VERSION = "1.0.3"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -445,6 +445,37 @@ end
 
 -- Unload a module
 function ModuleManager:unloadModule(module_id)
+  -- Special handling for unloading the manager itself
+  if module_id == "manager" or module_id == "emerge" then
+    cecho("<yellow>[EMERGE] Unloading module manager...<reset>\n")
+    cecho("<red>WARNING: This will remove EMERGE from Mudlet!<reset>\n")
+    cecho("<yellow>To reinstall, use the one-line installer from GitHub<reset>\n")
+    
+    -- Remove persistent loader
+    if exists("EMERGE_Loader", "script") then
+      killScript("EMERGE_Loader")
+      cecho("<yellow>[EMERGE] Removed persistent loader<reset>\n")
+    end
+    
+    -- Remove saved manager file
+    local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
+    if io.exists(manager_file) then
+      os.remove(manager_file)
+      cecho("<yellow>[EMERGE] Removed saved manager file<reset>\n")
+    end
+    
+    -- Unload self
+    tempTimer(0.5, function()
+      if EMERGE and EMERGE.unload then
+        EMERGE:unload()
+      end
+      EMERGE = nil
+      ModuleManager = nil
+      cecho("<red>[EMERGE] Module manager unloaded. Goodbye!<reset>\n")
+    end)
+    return
+  end
+  
   local module = self.modules[module_id]
   if module then
     if module.unload then
@@ -975,5 +1006,49 @@ function ModuleManager:unload(updating)
   self.loaded = false
 end
 
+-- Create persistent loader
+function ModuleManager:createPersistentLoader()
+  -- Check if we already have a loader script
+  if exists("EMERGE_Loader", "script") then
+    return
+  end
+  
+  -- Create a simple loader script
+  permScript("EMERGE_Loader", "EMERGE Module Loader", [[
+-- EMERGE Persistent Loader
+-- This script ensures EMERGE loads on every Mudlet startup
+
+local emerge_file = getMudletHomeDir() .. "/emerge-manager.lua"
+if io.exists(emerge_file) then
+  dofile(emerge_file)
+else
+  cecho("<yellow>[EMERGE] Manager file not found. Please reinstall EMERGE.<reset>\n")
+end
+]])
+  
+  enableScript("EMERGE_Loader")
+  
+  -- Also save the manager file to Mudlet home
+  local current_file = debug.getinfo(1, "S").source:sub(2)
+  local target_file = getMudletHomeDir() .. "/emerge-manager.lua"
+  
+  -- Copy current file to Mudlet home if not already there
+  if current_file ~= target_file then
+    local f = io.open(current_file, "r")
+    if f then
+      local content = f:read("*all")
+      f:close()
+      
+      local out = io.open(target_file, "w")
+      if out then
+        out:write(content)
+        out:close()
+        cecho("<green>[EMERGE] Created persistent copy of manager<reset>\n")
+      end
+    end
+  end
+end
+
 -- Auto-initialize
 ModuleManager:init()
+ModuleManager:createPersistentLoader()
