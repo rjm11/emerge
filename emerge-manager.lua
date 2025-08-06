@@ -904,19 +904,21 @@ function ModuleManager:showGitHubHelp()
   cechoLink("github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open")
   cecho([[
 
-  2. Click <SteelBlue>"Generate new token"<reset> → <SteelBlue>"Generate new token (classic)"<reset>
+  2. Click <SteelBlue>"Generate new token"<reset> → <SteelBlue>"Fine-grained personal access tokens"<reset>
   3. Give it a name like <DimGrey>"Mudlet EMERGE Access"<reset>
-  4. Set expiration (recommended: <SteelBlue>90 days<reset> or <SteelBlue>No expiration<reset>)
-  5. Select scopes:
-     ✓ <SteelBlue>repo<reset> (Full control of private repositories)
-       - Needed to access private module repositories
-  6. Click <SteelBlue>"Generate token"<reset> at the bottom
-  7. <yellow>IMPORTANT: Copy the token NOW - you won't see it again!<reset>
-     Token looks like: <DimGrey>ghp_xxxxxxxxxxxxxxxxxxxx<reset>
+  4. Set expiration (recommended: <SteelBlue>90 days<reset>)
+  5. Repository access:
+     • <SteelBlue>All repositories<reset> (easier) OR
+     • <SteelBlue>Selected repositories<reset> (choose specific private repos)
+  6. Repository permissions:
+     ✓ <SteelBlue>Contents<reset>: Read (minimum for public/private repos)
+  7. Click <SteelBlue>"Generate token"<reset> at the bottom
+  8. <yellow>IMPORTANT: Copy the token NOW - you won't see it again!<reset>
+     Token looks like: <DimGrey>github_pat_xxxxxxxxxxxxxxxxxxxx<reset>
 
 <LightSteelBlue>Step 2: Add Token to EMERGE<reset>
   Run: <SteelBlue>emodule token <your_token_here><reset>
-  Example: <DimGrey>emodule token ghp_1234567890abcdef<reset>
+  Example: <DimGrey>emodule token github_pat_1234567890abcdef<reset>
 
 <LightSteelBlue>Step 3: Add Modules<reset>
   Public repos:  <SteelBlue>emodule github owner/repository<reset>
