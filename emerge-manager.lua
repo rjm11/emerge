@@ -1124,8 +1124,13 @@ end, true)
   
   if group_id then
     cecho("<LightSteelBlue>[EMERGE] Created script group 'EMERGE' (ID: " .. tostring(group_id) .. ")<reset>\n")
+    -- Enable the group so it runs on startup
+    enableScript("EMERGE")
+    cecho("<LightSteelBlue>[EMERGE] Enabled script group<reset>\n")
   else
     cecho("<DimGrey>[EMERGE] Script group might already exist<reset>\n")
+    -- Try to enable it anyway in case it exists but is disabled
+    enableScript("EMERGE")
   end
   
   -- Create the loader script inside the EMERGE group
@@ -1134,12 +1139,17 @@ end, true)
 -- EMERGE Module Bootloader
 -- This script loads the EMERGE module system on Mudlet startup
 
+-- Set flag to indicate we're loading from the bootloader
+EMERGE_BOOTLOADER_ACTIVE = true
+
 local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
 if io.exists(manager_file) then
   cecho("<DimGrey>[EMERGE] Loading from bootloader...<reset>\n")
   dofile(manager_file)
 else
   cecho("<IndianRed>[EMERGE] Manager file not found. Please reinstall EMERGE.<reset>\n")
+  cecho("<yellow>Run this command to reinstall:<reset>\n")
+  cecho("<green>lua downloadFile(getMudletHomeDir()..'/emerge-manager.lua','https://raw.githubusercontent.com/rjm11/emerge/main/emerge-manager.lua') registerAnonymousEventHandler('sysDownloadDone',function(e,p) if p:find('emerge%-manager%.lua$') then dofile(p) end end,true)<reset>\n")
 end
 ]]
   
@@ -1239,39 +1249,40 @@ end
 -- Auto-initialize
 ModuleManager:init()
 
--- Try to create persistent loader
--- ALWAYS force-create on first load to ensure it's properly saved
-cecho("<yellow>[EMERGE] Setting up persistence...<reset>\n")
-
--- Check if this is likely a fresh install (no existing bootloader in Script Editor)
-local needs_install = true
-if exists("EMERGE Module Bootloader", "script") then
-  -- The script might exist temporarily but not be saved
-  -- Force reinstall if we're running from the downloaded file
-  local current_file = getMudletHomeDir() .. "/emerge-manager.lua"
-  if io.exists(current_file) then
-    cecho("<yellow>[EMERGE] Verifying bootloader persistence...<reset>\n")
-    -- Still try to create it to ensure it's saved
-    needs_install = true
-  else
-    needs_install = false
-  end
-end
-
-if needs_install then
-  local ok, err = pcall(function()
-    ModuleManager:createPersistentLoader(true) -- Force create
-  end)
+-- Check if we're being loaded from the bootloader or from a fresh install
+-- If EMERGE_BOOTLOADER_ACTIVE is set, we're being loaded from the bootloader
+if not EMERGE_BOOTLOADER_ACTIVE then
+  -- We're NOT being loaded from the bootloader, so this is either:
+  -- 1. A fresh install from the one-line installer
+  -- 2. Someone running 'lua dofile(...)' manually
   
-  if not ok then
-    cecho("<red>[EMERGE] Auto-install failed: " .. tostring(err) .. "<reset>\n")
-    cecho("<yellow>[EMERGE] Type 'emodule install' to try manual installation<reset>\n")
-    cecho("<yellow>[EMERGE] Or follow these steps:<reset>\n")
-    cecho("<LightSteelBlue>1. Open Script Editor (Alt+E)<reset>\n")
-    cecho("<LightSteelBlue>2. Create a script group named 'EMERGE'<reset>\n")
-    cecho("<LightSteelBlue>3. Add a script with: dofile(getMudletHomeDir()..'/emerge-manager.lua')<reset>\n")
-    cecho("<LightSteelBlue>4. Save your profile (Ctrl+S)<reset>\n")
+  cecho("<yellow>[EMERGE] Setting up persistence...<reset>\n")
+  
+  -- Check if bootloader exists but we're not running from it
+  local needs_install = true
+  if exists("EMERGE Module Bootloader", "script") then
+    cecho("<yellow>[EMERGE] Bootloader exists but may not be saved properly<reset>\n")
+    needs_install = true
+  end
+  
+  if needs_install then
+    local ok, err = pcall(function()
+      ModuleManager:createPersistentLoader(true) -- Force create
+    end)
+    
+    if not ok then
+      cecho("<red>[EMERGE] Auto-install failed: " .. tostring(err) .. "<reset>\n")
+      cecho("<yellow>[EMERGE] Type 'emodule install' to try manual installation<reset>\n")
+      cecho("<yellow>[EMERGE] Or follow these steps:<reset>\n")
+      cecho("<LightSteelBlue>1. Open Script Editor (Alt+E)<reset>\n")
+      cecho("<LightSteelBlue>2. Create a script group named 'EMERGE'<reset>\n")
+      cecho("<LightSteelBlue>3. Add a script with: dofile(getMudletHomeDir()..'/emerge-manager.lua')<reset>\n")
+      cecho("<LightSteelBlue>4. Save your profile (Ctrl+S)<reset>\n")
+    end
   end
 else
-  cecho("<DimGrey>[EMERGE] Bootloader verified<reset>\n")
+  -- We're being loaded from the bootloader, everything is good
+  cecho("<DimGrey>[EMERGE] Loaded from bootloader<reset>\n")
+  -- Clear the flag for next time
+  EMERGE_BOOTLOADER_ACTIVE = nil
 end
