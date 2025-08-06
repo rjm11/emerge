@@ -1067,44 +1067,48 @@ function ModuleManager:createPersistentLoader()
   
   cecho("<DarkOrange>[EMERGE] Creating persistent loader...<reset>\n")
   
+  -- First, ensure the manager file exists at the expected location
+  local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
+  if not io.exists(manager_file) then
+    cecho("<IndianRed>[EMERGE] Manager file not found at expected location<reset>\n")
+    cecho("<DarkOrange>[EMERGE] Please re-run the installer to set up persistence<reset>\n")
+    return
+  end
+  
   -- Create a script group/folder first
   local group_id = permGroup("EMERGE", "script")
-  cecho("<LightSteelBlue>[EMERGE] Created script group 'EMERGE' (ID: " .. tostring(group_id) .. ")<reset>\n")
+  if group_id then
+    cecho("<LightSteelBlue>[EMERGE] Created script group 'EMERGE'<reset>\n")
+  else
+    -- Group might already exist, which is fine
+    cecho("<DimGrey>[EMERGE] Using existing script group 'EMERGE'<reset>\n")
+  end
   
   -- Create the loader script inside the EMERGE group
   local script_id = permScript("EMERGE Module Bootloader", "EMERGE", [[
 -- EMERGE Module Bootloader
 -- This script loads the EMERGE module system on Mudlet startup
-dofile(getMudletHomeDir() .. "/emerge-manager.lua")
+-- It also checks for updates to the manager file
+
+local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
+if io.exists(manager_file) then
+  dofile(manager_file)
+else
+  cecho("<IndianRed>[EMERGE] Manager file not found. Please reinstall EMERGE.<reset>\n")
+end
 ]])
   
-  cecho("<LightSteelBlue>[EMERGE] Created bootloader script (ID: " .. tostring(script_id) .. ")<reset>\n")
-  
-  -- Enable the script
-  enableScript("EMERGE Module Bootloader")
-  cecho("<LightSteelBlue>[EMERGE] Enabled bootloader script<reset>\n")
-  
-  cecho("<LightSteelBlue>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
-  cecho("<DimGrey>EMERGE will now load automatically on Mudlet startup<reset>\n")
-  
-  -- Also save the manager file to Mudlet home
-  local current_file = debug.getinfo(1, "S").source:sub(2)
-  local target_file = getMudletHomeDir() .. "/emerge-manager.lua"
-  
-  -- Copy current file to Mudlet home if not already there
-  if current_file ~= target_file then
-    local f = io.open(current_file, "r")
-    if f then
-      local content = f:read("*all")
-      f:close()
-      
-      local out = io.open(target_file, "w")
-      if out then
-        out:write(content)
-        out:close()
-        cecho("<LightSteelBlue>[EMERGE] Created persistent copy of manager<reset>\n")
-      end
-    end
+  if script_id then
+    cecho("<LightSteelBlue>[EMERGE] Created bootloader script<reset>\n")
+    
+    -- Enable the script
+    enableScript("EMERGE Module Bootloader")
+    cecho("<LightSteelBlue>[EMERGE] Enabled bootloader script<reset>\n")
+    
+    cecho("<LightSteelBlue>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
+    cecho("<DimGrey>EMERGE will now load automatically on Mudlet startup<reset>\n")
+  else
+    cecho("<IndianRed>[EMERGE] Failed to create bootloader script<reset>\n")
   end
 end
 
