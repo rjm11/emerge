@@ -33,7 +33,7 @@ if EMERGE and EMERGE.loaded then
     end)
   else
     -- Already loaded - check if this is during initial setup
-    if not EMERGE.installing then
+    if not (EMERGE.installing or EMERGE.creating_bootloader) then
       cecho("<DarkOrange>[EMERGE] Already loaded.<reset>\n")
     end
     return
@@ -43,7 +43,10 @@ end
 -- Create EMERGE Manager
 EMERGE = EMERGE or {}
 EMERGE.version = CURRENT_VERSION
-EMERGE.loaded = false
+-- Don't reset loaded flag if we're updating
+if not EMERGE.loaded then
+  EMERGE.loaded = false
+end
 EMERGE.modules = EMERGE.modules or {}
 EMERGE.aliases = {}
 EMERGE.handlers = {}
@@ -1073,6 +1076,9 @@ end
 
 -- Create persistent loader
 function ModuleManager:createPersistentLoader(forceCreate)
+  -- Set flag to prevent duplicate loading during installation
+  EMERGE.creating_bootloader = true
+  
   -- If force create, try to remove existing first
   if forceCreate and exists("EMERGE Module Bootloader", "script") then
     pcall(function()
@@ -1080,6 +1086,7 @@ function ModuleManager:createPersistentLoader(forceCreate)
       killScript("EMERGE Module Bootloader")
     end)
   elseif not forceCreate and exists("EMERGE Module Bootloader", "script") then
+    EMERGE.creating_bootloader = false
     return
   end
   
@@ -1156,6 +1163,9 @@ end
     cecho("<LightSteelBlue>3. Add a script with: dofile(getMudletHomeDir()..'/emerge-manager.lua')<reset>\n")
     cecho("<LightSteelBlue>4. Save your profile (Ctrl+S)<reset>\n")
   end
+  
+  -- Clear flag
+  EMERGE.creating_bootloader = false
 end
 
 -- Add a manual install command
