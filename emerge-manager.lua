@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.9
+-- Version: 1.1.0
 
-local CURRENT_VERSION = "1.0.9"
+local CURRENT_VERSION = "1.1.0"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -47,6 +47,12 @@ EMERGE.handlers = {}
 
 -- For backward compatibility
 ModuleManager = EMERGE
+
+-- Helper function for clickable links
+function ModuleManager:mxpLink(url, text)
+  text = text or url
+  return string.format([[<send href="%s">%s</send>]], url, text)
+end
 
 -- Configuration paths
 ModuleManager.paths = {
@@ -687,7 +693,7 @@ function ModuleManager:setGitHubToken(token)
   if not token or token == "" then
     cecho("<DarkOrange>[EMERGE] GitHub Token Setup<reset>\n\n")
     cecho("<LightSteelBlue>To create a GitHub personal access token:<reset>\n")
-    cecho("  1. Go to https://github.com/settings/tokens\n")
+    cecho(string.format("  1. Go to %s\n", self:mxpLink("https://github.com/settings/tokens")))
     cecho("  2. Click 'Generate new token (classic)'\n")
     cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
     cecho("  4. Select the 'repo' scope checkbox\n")
@@ -867,14 +873,14 @@ function ModuleManager:showBootup()
   -- Clear some space
   echo("\n\n")
   
-  -- EMERGE ASCII art with modern gradient
-  cecho([[
-    <DimGray>███████╗███╗   ███╗███████╗██████╗  ██████╗ ███████╗<reset>
-    <DimGray>██╔════╝████╗ ████║██╔════╝██╔══██╗██╔════╝ ██╔════╝<reset>
-    <SlateGray>█████╗  ██╔████╔██║█████╗  ██████╔╝██║  ███╗█████╗<reset>  
-    <SlateGray>██╔══╝  ██║╚██╔╝██║██╔══╝  ██╔══██╗██║   ██║██╔══╝<reset>  
-    <LightSlateGray>███████╗██║ ╚═╝ ██║███████╗██║  ██║╚██████╔╝███████╗<reset>
-    <LightSlateGray>╚══════╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝<reset>
+  -- EMERGE ASCII art with clean modern look
+  cecho([[<SlateGray>
+    ███████╗███╗   ███╗███████╗██████╗  ██████╗ ███████╗
+    ██╔════╝████╗ ████║██╔════╝██╔══██╗██╔════╝ ██╔════╝
+    █████╗  ██╔████╔██║█████╗  ██████╔╝██║  ███╗█████╗  
+    ██╔══╝  ██║╚██╔╝██║██╔══╝  ██╔══██╗██║   ██║██╔══╝  
+    ███████╗██║ ╚═╝ ██║███████╗██║  ██║╚██████╔╝███████╗
+    ╚══════╝╚═╝     ╚═╝╚══════╝╚═╝  ╚═╝ ╚═════╝ ╚══════╝<reset>
 ]])
   
   cecho("<LightSteelBlue>    Emergent Modular Engagement & Response Generation Engine<reset>\n")
@@ -934,7 +940,7 @@ function ModuleManager:checkCoreModules()
       cecho("You need a GitHub personal access token to download them.\n\n")
       
       cecho("<LightSteelBlue>Step 1: Create a GitHub Token<reset>\n")
-      cecho("  1. Go to https://github.com/settings/tokens\n")
+      cecho(string.format("  1. Go to %s\n", self:mxpLink("https://github.com/settings/tokens")))
       cecho("  2. Click 'Generate new token (classic)'\n")
       cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
       cecho("  4. Select the 'repo' scope\n")
@@ -947,7 +953,7 @@ function ModuleManager:checkCoreModules()
       cecho("  <SteelBlue>emodule load core<reset> - Required event system\n")
       cecho("  <SteelBlue>emodule load gmcp<reset> - Game data handler\n\n")
       
-      cecho("<DimGrey>Need help? Visit: https://github.com/rjm11/emerge/wiki<reset>\n")
+      cecho(string.format("<DimGrey>Need help? Visit: %s<reset>\n", self:mxpLink("https://github.com/rjm11/emerge/wiki")))
     else
       -- Token is set, show regular missing module messages
       if core_missing then
@@ -963,7 +969,7 @@ function ModuleManager:checkCoreModules()
       end
       
       cecho("<DimGrey>After installing core modules, run 'emodule list' to see available modules<reset>\n")
-      cecho("<DimGrey>Visit the wiki for more information: https://github.com/rjm11/emerge/wiki<reset>\n")
+      cecho(string.format("<DimGrey>Visit the wiki for more information: %s<reset>\n", self:mxpLink("https://github.com/rjm11/emerge/wiki")))
     end
   else
     cecho("<LightSteelBlue>✓ Core modules loaded successfully<reset>\n\n")
@@ -971,7 +977,7 @@ function ModuleManager:checkCoreModules()
     cecho("  emodule list    - See all available modules\n")
     cecho("  emodule help    - View all commands\n")
     cecho("  emodule github  - Add modules from GitHub\n\n")
-    cecho("<DimGrey>Visit the wiki: https://github.com/rjm11/emerge/wiki<reset>\n")
+    cecho(string.format("<DimGrey>Visit the wiki: %s<reset>\n", self:mxpLink("https://github.com/rjm11/emerge/wiki")))
   end
 end
 
@@ -1036,7 +1042,7 @@ end
 function ModuleManager:createPersistentLoader()
   -- Check if we already have a loader script
   if exists("EMERGE_Loader", "script") then
-    cecho("<DimGrey>[EMERGE] Persistent loader already exists<reset>\n")
+    -- Silently return if it already exists
     return
   end
   
