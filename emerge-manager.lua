@@ -1124,10 +1124,13 @@ end, true)
   
   if group_id then
     cecho("<LightSteelBlue>[EMERGE] Created script group 'EMERGE' (ID: " .. tostring(group_id) .. ")<reset>\n")
-    -- Scripts run automatically on profile load, no need to enable the group
   else
     cecho("<DimGrey>[EMERGE] Script group might already exist<reset>\n")
   end
+  
+  -- Enable the group to ensure it's checked in Script Editor
+  enableScript("EMERGE")
+  cecho("<LightSteelBlue>[EMERGE] Enabled script group 'EMERGE'<reset>\n")
   
   -- Create the loader script inside the EMERGE group
   cecho("<yellow>[EMERGE DEBUG] Creating permScript...<reset>\n")
@@ -1155,7 +1158,10 @@ end
   if script_id then
     cecho("<LightSteelBlue>[EMERGE] Created bootloader script (ID: " .. tostring(script_id) .. ")<reset>\n")
     
-    -- Scripts automatically run on profile load - no need to enable
+    -- Enable the script to ensure it's checked in Script Editor
+    enableScript("EMERGE Module Bootloader")
+    cecho("<LightSteelBlue>[EMERGE] Enabled bootloader script<reset>\n")
+    
     cecho("<LightSteelBlue>[EMERGE] ✓ Persistent loader created successfully<reset>\n")
     cecho("<DimGrey>[EMERGE] Script will run automatically on profile load<reset>\n")
     
