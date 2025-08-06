@@ -1130,6 +1130,11 @@ end, true)
 -- EMERGE Module Bootloader
 -- This script loads the EMERGE module system on Mudlet startup
 
+-- Don't run if we're being created right now
+if EMERGE and EMERGE.creating_bootloader then
+  return
+end
+
 -- Set flag to indicate we're loading from the bootloader
 EMERGE_BOOTLOADER_ACTIVE = true
 
