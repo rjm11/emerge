@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.3
+-- Version: 1.0.4
 
-local CURRENT_VERSION = "1.0.3"
+local CURRENT_VERSION = "1.0.4"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -451,10 +451,12 @@ function ModuleManager:unloadModule(module_id)
     cecho("<red>WARNING: This will remove EMERGE from Mudlet!<reset>\n")
     cecho("<yellow>To reinstall, use the one-line installer from GitHub<reset>\n")
     
-    -- Remove persistent loader
+    -- Remove persistent loader and group
     if exists("EMERGE_Loader", "script") then
-      killScript("EMERGE_Loader")
-      cecho("<yellow>[EMERGE] Removed persistent loader<reset>\n")
+      disableScript("EMERGE_Loader")
+      -- Note: There's no killScript function, scripts must be removed manually
+      cecho("<yellow>[EMERGE] Disabled persistent loader<reset>\n")
+      cecho("<yellow>To fully remove, delete the EMERGE script group in the Script Editor<reset>\n")
     end
     
     -- Remove saved manager file
@@ -1013,8 +1015,11 @@ function ModuleManager:createPersistentLoader()
     return
   end
   
-  -- Create a simple loader script
-  permScript("EMERGE_Loader", "EMERGE Module Loader", [[
+  -- Create a script group first
+  permScript("EMERGE", "", "")
+  
+  -- Create the loader script inside the group
+  local script_id = permScript("EMERGE_Loader", "EMERGE", [[
 -- EMERGE Persistent Loader
 -- This script ensures EMERGE loads on every Mudlet startup
 
@@ -1026,7 +1031,10 @@ else
 end
 ]])
   
+  -- Enable the script
   enableScript("EMERGE_Loader")
+  
+  cecho("<green>[EMERGE] Created persistent loader (ID: " .. tostring(script_id) .. ")<reset>\n")
   
   -- Also save the manager file to Mudlet home
   local current_file = debug.getinfo(1, "S").source:sub(2)
