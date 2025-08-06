@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.2
+-- Version: 0.5.3
 
-local CURRENT_VERSION = "0.5.2"
+local CURRENT_VERSION = "0.5.3"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -885,6 +885,7 @@ end
 -- Show configuration
 function ModuleManager:showConfig()
   cecho("<SlateGray>==== Module Manager Configuration ====<reset>\n\n")
+  cecho(string.format("<LightSteelBlue>Version:<reset> %s\n", self.version))
   cecho(string.format("Auto-update: %s\n", self.config.auto_update and "<PaleGreen>ON<reset>" or "<IndianRed>OFF<reset>"))
   cecho(string.format("Auto-load modules: %s\n", self.config.auto_load_modules and "<PaleGreen>ON<reset>" or "<IndianRed>OFF<reset>"))
   cecho(string.format("Update interval: %d seconds\n", self.config.update_interval))
