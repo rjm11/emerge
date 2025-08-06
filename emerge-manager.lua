@@ -61,60 +61,9 @@ ModuleManager.paths = {
   cache = getMudletHomeDir() .. "/emerge-cache/"
 }
 
--- Default module registry (can be updated from GitHub)
-ModuleManager.default_registry = {
-  ["core"] = {
-    name = "EMERGE Core",
-    description = "Core event system and foundational functionality (REQUIRED)",
-    github = {
-      owner = "rjm11",
-      repo = "emerge",
-      file = "core/init.lua"
-    },
-    enabled = true,
-    auto_load = true,
-    required = true,
-    load_order = 1
-  },
-  ["gmcp"] = {
-    name = "GMCP Handler",
-    description = "Generic MUD Communication Protocol handler (HIGHLY RECOMMENDED)",
-    github = {
-      owner = "rjm11",
-      repo = "emerge",
-      file = "modules/gmcp.lua"
-    },
-    enabled = true,
-    auto_load = true,
-    recommended = true,
-    load_order = 2
-  },
-  ["ai"] = {
-    name = "AI Assistant",
-    description = "Multi-provider AI integration (Ollama, Groq, OpenAI)",
-    github = {
-      owner = "rjm11",
-      repo = "mudlet-ai-module",
-      file = "ai-module.lua"
-    },
-    enabled = true,
-    auto_load = false,
-    load_order = 10
-  },
-  ["combat"] = {
-    name = "Combat System",
-    description = "Advanced combat automation and tracking",
-    github = {
-      owner = "rjm11",
-      repo = "mudlet-combat-module",
-      file = "combat-module.lua"
-    },
-    enabled = false,
-    auto_load = false,
-    load_order = 11
-  }
-  -- More modules can be added here or loaded from GitHub
-}
+-- Default module registry - empty until modules are actually created
+-- Modules can be added via 'emodule github' command
+ModuleManager.default_registry = {}
 
 -- GitHub configuration for self-updates
 ModuleManager.github = {
@@ -764,63 +713,46 @@ end
 
 -- List modules command
 function ModuleManager:listModules()
-  cecho("<SlateGray>==== EMERGE Module System ====<reset>\n\n")
+  cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
+  cecho("<LightSteelBlue>EMERGE Module System<reset>\n")
+  cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
   
-  -- Show loaded modules
-  cecho("<LightSteelBlue>Loaded Modules:<reset>\n")
-  
-  -- Always show the manager itself
-  cecho(string.format("  <SteelBlue>manager<reset> v%s - EMERGE Module Manager <DimGrey>(this system)<reset>\n", self.version))
+  -- Show currently loaded modules
+  cecho("<LightSteelBlue>Currently Loaded:<reset>\n")
+  cecho(string.format("  <SteelBlue>• emerge-manager<reset> v%s <DimGrey>(core system)<reset>\n", self.version))
   
   if next(self.modules) then
     for id, module in pairs(self.modules) do
-      cecho(string.format("  <SteelBlue>%s<reset> v%s - %s\n", 
+      cecho(string.format("  <SteelBlue>• %s<reset> v%s - %s\n", 
         id, module.version or "?", module.name or "Unknown"))
     end
+  end
+  
+  -- Show available modules (from custom only, since default is now empty)
+  local custom_count = 0
+  for id, info in pairs(self.custom_modules) do
+    if not self.modules[id] then
+      custom_count = custom_count + 1
+    end
+  end
+  
+  if custom_count > 0 then
+    cecho("\n<LightSteelBlue>Available to Load:<reset>\n")
+    for id, info in pairs(self.custom_modules) do
+      if not self.modules[id] then
+        local source = string.format("<DimGrey>(%s/%s)<reset>", 
+          info.github and info.github.owner or "local",
+          info.github and info.github.repo or "unknown")
+        cecho(string.format("  <SteelBlue>• %s<reset> - %s %s\n", 
+          id, info.name or "Unknown", source))
+      end
+    end
   else
-    cecho("  <DimGrey>No additional modules loaded<reset>\n")
+    cecho("\n<DimGrey>No additional modules available<reset>\n")
+    cecho("<DimGrey>Add modules with: emodule github <owner/repo><reset>\n")
   end
   
-  cecho("\n<LightSteelBlue>Available Modules:<reset>\n")
-  local available = self:getModuleList()
-  local has_available = false
-  
-  -- Separate default and custom modules
-  cecho("  <DimGrey>Default:<reset>\n")
-  for id, info in pairs(available) do
-    if not self.modules[id] and not info.added_by then
-      has_available = true
-      local status = info.enabled and "<PaleGreen>[enabled]<reset>" or "<IndianRed>[disabled]<reset>"
-      local flags = ""
-      if info.required then
-        flags = " <IndianRed>[REQUIRED]<reset>"
-      elseif info.recommended then
-        flags = " <LightSteelBlue>[RECOMMENDED]<reset>"
-      end
-      cecho(string.format("    <SteelBlue>%s<reset> - %s %s%s\n", id, info.name, status, flags))
-    end
-  end
-  
-  -- Show custom modules
-  local has_custom = false
-  for id, info in pairs(available) do
-    if not self.modules[id] and info.added_by == "user" then
-      if not has_custom then
-        cecho("\n  <DimGrey>Custom:<reset>\n")
-        has_custom = true
-      end
-      has_available = true
-      local status = info.enabled and "<PaleGreen>[enabled]<reset>" or "<IndianRed>[disabled]<reset>"
-      local source = string.format("<DimGrey>(%s/%s)<reset>", info.github.owner, info.github.repo)
-      cecho(string.format("    <SteelBlue>%s<reset> - %s %s %s\n", id, info.name, status, source))
-    end
-  end
-  
-  if not has_available then
-    cecho("  <DimGrey>None available<reset>\n")
-  end
-  
-  cecho("\n<DimGrey>Type 'module help' for commands<reset>\n")
+  cecho("\n<DimGrey>Type 'emodule help' for all commands<reset>\n")
 end
 
 -- Show configuration
@@ -952,72 +884,21 @@ function ModuleManager:showIntroduction()
   self:saveConfig()
 end
 
--- Check and prompt for core modules
+-- Show welcome message
 function ModuleManager:checkCoreModules()
-  local core_missing = not self.modules["core"]
-  local gmcp_missing = not self.modules["gmcp"]
-  
-  if core_missing or gmcp_missing then
-    cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
-    cecho("<LightSteelBlue>Welcome to EMERGE<reset>\n")
-    cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
-    
-    -- Check if token is set
-    if not self.config.github_token then
-      cecho("<IndianRed>IMPORTANT: GitHub Token Required<reset>\n")
-      cecho("The EMERGE modules are hosted in a private repository.\n")
-      cecho("You need a GitHub personal access token to download them.\n\n")
-      
-      cecho("<LightSteelBlue>Step 1: Create a GitHub Token<reset>\n")
-      cecho("  1. Go to ")
-      cechoLink("https://github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open in browser")
-      echo("\n")
-      cecho("  2. Click 'Generate new token (classic)'\n")
-      cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
-      cecho("  4. Select the 'repo' scope\n")
-      cecho("  5. Click 'Generate token' and copy it\n\n")
-      
-      cecho("<LightSteelBlue>Step 2: Set Your Token<reset>\n")
-      cecho("  <SteelBlue>emodule token YOUR_TOKEN_HERE<reset>\n\n")
-      
-      cecho("<LightSteelBlue>Step 3: Load Core Modules<reset>\n")
-      cecho("  <SteelBlue>emodule load core<reset> - Required event system\n")
-      cecho("  <SteelBlue>emodule load gmcp<reset> - Game data handler\n\n")
-      
-      cecho("<DimGrey>Need help? Visit: <reset>")
-      cechoLink("<DimGrey>https://github.com/rjm11/emerge/wiki<reset>", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open wiki")
-      echo("\n")
-    else
-      -- Token is set, show regular missing module messages
-      if core_missing then
-        cecho("<IndianRed>MISSING: EMERGE Core Module (REQUIRED)<reset>\n")
-        cecho("The core module provides the event system that all other modules depend on.\n")
-        cecho("<SteelBlue>To install: emodule load core<reset>\n\n")
-      end
-      
-      if gmcp_missing then
-        cecho("<LightSteelBlue>MISSING: GMCP Handler Module (Highly Recommended)<reset>\n")
-        cecho("GMCP provides vital game data that most modules need to function properly.\n")
-        cecho("<SteelBlue>To install: emodule load gmcp<reset>\n\n")
-      end
-      
-      cecho("<DimGrey>After installing core modules, run 'emodule list' to see available modules<reset>\n")
-      cecho("<DimGrey>Visit the wiki for more information: <reset>")
-      cechoLink("<DimGrey>https://github.com/rjm11/emerge/wiki<reset>", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open wiki")
-      echo("\n")
-    end
-  else
-    cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
-    cecho("<green>✓ System Ready<reset>\n")
-    cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
-    cecho("<LightSteelBlue>Quick Start:<reset>\n")
-    cecho("  <SteelBlue>emodule help<reset>    - View all commands\n")
-    cecho("  <SteelBlue>emodule list<reset>    - See available modules\n")
-    cecho("  <SteelBlue>emodule github<reset>  - Add modules from GitHub\n\n")
-    cecho("<DimGrey>Documentation: ")
-    cechoLink("github.com/rjm11/emerge/wiki", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open")
-    cecho("<reset>\n")
-  end
+  -- Since we don't have any fake modules anymore, just show the welcome
+  cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
+  cecho("<green>✓ System Ready<reset>\n")
+  cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
+  cecho("<LightSteelBlue>Quick Start:<reset>\n")
+  cecho("  <SteelBlue>emodule help<reset>    - View all commands\n")
+  cecho("  <SteelBlue>emodule list<reset>    - See available modules\n")
+  cecho("  <SteelBlue>emodule github<reset>  - Add modules from GitHub\n\n")
+  cecho("<DimGrey>Add your first module:<reset>\n")
+  cecho("  <DimGrey>emodule github <owner/repo><reset>\n\n")
+  cecho("<DimGrey>Documentation: ")
+  cechoLink("github.com/rjm11/emerge/wiki", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open")
+  cecho("<reset>\n")
 end
 
 -- Initialize
