@@ -820,6 +820,16 @@ function ModuleManager:createAliases()
   self.aliases.help_short = tempAlias("^emodule$", [[EMERGE:showHelp()]])
   self.aliases.install = tempAlias("^emodule install$", [[EMERGE:manualInstall()]])
   self.aliases.status = tempAlias("^emodule status$", [[EMERGE:checkStatus()]])
+  self.aliases.reload = tempAlias("^emodule reload$", [[
+    cecho("<DimGrey>[EMERGE] Reloading manager from disk...<reset>\n")
+    local f = getMudletHomeDir() .. "/emerge-manager.lua"
+    if io.exists(f) then
+      dofile(f)
+      cecho("<LightSteelBlue>[EMERGE] Reloaded successfully<reset>\n")
+    else
+      cecho("<IndianRed>[EMERGE] Manager file not found<reset>\n")
+    end
+  ]])
 end
 
 -- List modules command
