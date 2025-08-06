@@ -768,6 +768,12 @@ end
 
 -- Show help
 function ModuleManager:showHelp()
+  -- Check if GitHub token is saved
+  local token_status = ""
+  if self.config.github_token and self.config.github_token ~= "" then
+    token_status = " <DarkGreen>(token saved)<reset>"
+  end
+  
   cecho([[
 <SlateGray>==== EMERGE Module System ====<reset>
 <DimGrey>Emergent Modular Engagement & Response Generation Engine<reset>
@@ -783,7 +789,8 @@ function ModuleManager:showHelp()
 <LightSteelBlue>System Management:<reset>
   <SteelBlue>emodule unload manager confirm<reset>  Completely remove EMERGE
   
-<LightSteelBlue>GitHub Integration:<reset>
+<LightSteelBlue>GitHub Integration:<reset>]] .. token_status .. [[
+
   <SteelBlue>emodule github <url><reset>     Add module from GitHub repository
   <SteelBlue>emodule remove <id><reset>      Remove a custom module
   <SteelBlue>emodule token <token><reset>    Set GitHub token for private repos
