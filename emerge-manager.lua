@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.4
+-- Version: 1.0.5
 
-local CURRENT_VERSION = "1.0.4"
+local CURRENT_VERSION = "1.0.5"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1020,15 +1020,8 @@ function ModuleManager:createPersistentLoader()
   
   -- Create the loader script inside the group
   local script_id = permScript("EMERGE_Loader", "EMERGE", [[
--- EMERGE Persistent Loader
--- This script ensures EMERGE loads on every Mudlet startup
-
-local emerge_file = getMudletHomeDir() .. "/emerge-manager.lua"
-if io.exists(emerge_file) then
-  dofile(emerge_file)
-else
-  cecho("<yellow>[EMERGE] Manager file not found. Please reinstall EMERGE.<reset>\n")
-end
+-- EMERGE Loader
+dofile(getMudletHomeDir() .. "/emerge-manager.lua")
 ]])
   
   -- Enable the script
