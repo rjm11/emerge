@@ -1008,9 +1008,18 @@ function ModuleManager:checkCoreModules()
   cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
   cecho("<LightSteelBlue>Quick Start:<reset>\n")
   cecho("  <SteelBlue>emodule help<reset>         - View all commands\n")
-  cecho("  <SteelBlue>emodule list<reset>         - See available modules\n")
-  cecho("  <SteelBlue>emodule github <url><reset> - Add modules from GitHub\n\n")
-  cecho("<DimGrey>Add your first module:<reset>\n")
+  cecho("  <SteelBlue>emodule list<reset>         - See available modules\n\n")
+  
+  -- Check if token is set
+  if not self.config.github_token or self.config.github_token == "" then
+    cecho("<yellow>First-time setup:<reset>\n")
+    cecho("  <DimGrey>1. Get a GitHub token from: github.com/settings/tokens<reset>\n")
+    cecho("  <DimGrey>2. Set your token: <SteelBlue>emodule token <token><reset>\n\n")
+    cecho("<DimGrey>Then add modules:<reset>\n")
+  else
+    cecho("<DimGrey>Add modules from GitHub:<reset>\n")
+  end
+  
   cecho("  <DimGrey>emodule github <url><reset>\n")
   cecho("  <DimGrey>emodule github <owner/repo><reset>\n\n")
   cecho("<DimGrey>Documentation: ")
