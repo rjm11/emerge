@@ -32,7 +32,10 @@ if EMERGE and EMERGE.loaded then
       end
     end)
   else
-    cecho("<DarkOrange>[EMERGE] Already loaded.<reset>\n")
+    -- Already loaded - check if this is during initial setup
+    if not EMERGE.installing then
+      cecho("<DarkOrange>[EMERGE] Already loaded.<reset>\n")
+    end
     return
   end
 end
@@ -1218,9 +1221,13 @@ ModuleManager:init()
 -- Check if we're being loaded from the bootloader or from a fresh install
 if not EMERGE_BOOTLOADER_ACTIVE then
   -- Fresh install - set up persistence
+  EMERGE.installing = true  -- Set flag to suppress "already loaded" message
+  
   local ok, err = pcall(function()
     ModuleManager:createPersistentLoader(true)
   end)
+  
+  EMERGE.installing = false  -- Clear flag
   
   if not ok then
     cecho("<red>[EMERGE] Auto-install failed: " .. tostring(err) .. "<reset>\n")
