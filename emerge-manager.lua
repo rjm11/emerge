@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.4
+-- Version: 0.5.0
 
-local CURRENT_VERSION = "1.1.4"
+local CURRENT_VERSION = "0.5.0"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -68,7 +68,7 @@ ModuleManager.default_registry = {}
 -- GitHub configuration for self-updates
 ModuleManager.github = {
   owner = "rjm11",
-  repo = "mudlet-emerge-manager",
+  repo = "emerge",
   branch = "main",
   files = {
     manager = "emerge-manager.lua",
