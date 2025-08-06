@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.1
+-- Version: 1.0.2
 
-local CURRENT_VERSION = "1.0.1"
+local CURRENT_VERSION = "1.0.2"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -584,6 +584,11 @@ function ModuleManager:autoLoadModules()
     return
   end
   
+  -- Don't auto-load if no token is set (modules are in private repo)
+  if not self.config.github_token then
+    return
+  end
+  
   local modules = self:getModuleList()
   local to_load = {}
   
@@ -605,7 +610,7 @@ function ModuleManager:autoLoadModules()
   
   -- Load in order
   for _, module in ipairs(to_load) do
-    cecho(string.format("<dim>[EMERGE] Auto-loading %s...<reset>\n", module.id))
+    cecho(string.format("<DimGrey>[EMERGE] Auto-loading %s...<reset>\n", module.id))
     self:loadModule(module.id)
   end
 end
@@ -621,7 +626,7 @@ function ModuleManager:setGitHubToken(token)
   self:saveConfig()
   
   cecho("<green>[EMERGE] GitHub token saved<reset>\n")
-  cecho("<dim>You can now access private repositories<reset>\n")
+  cecho("<DimGrey>You can now access private repositories<reset>\n")
 end
 
 -- Create aliases
@@ -666,7 +671,7 @@ function ModuleManager:listModules()
         id, module.version or "?", module.name or "Unknown"))
     end
   else
-    cecho("  <dim>None<reset>\n")
+    cecho("  <DimGrey>None<reset>\n")
   end
   
   cecho("\n<yellow>Available Modules:<reset>\n")
@@ -674,7 +679,7 @@ function ModuleManager:listModules()
   local has_available = false
   
   -- Separate default and custom modules
-  cecho("  <dim>Default:<reset>\n")
+  cecho("  <DimGrey>Default:<reset>\n")
   for id, info in pairs(available) do
     if not self.modules[id] and not info.added_by then
       has_available = true
@@ -694,21 +699,21 @@ function ModuleManager:listModules()
   for id, info in pairs(available) do
     if not self.modules[id] and info.added_by == "user" then
       if not has_custom then
-        cecho("\n  <dim>Custom:<reset>\n")
+        cecho("\n  <DimGrey>Custom:<reset>\n")
         has_custom = true
       end
       has_available = true
       local status = info.enabled and "<green>[enabled]<reset>" or "<red>[disabled]<reset>"
-      local source = string.format("<dim>(%s/%s)<reset>", info.github.owner, info.github.repo)
+      local source = string.format("<DimGrey>(%s/%s)<reset>", info.github.owner, info.github.repo)
       cecho(string.format("    <cyan>%s<reset> - %s %s %s\n", id, info.name, status, source))
     end
   end
   
   if not has_available then
-    cecho("  <dim>None available<reset>\n")
+    cecho("  <DimGrey>None available<reset>\n")
   end
   
-  cecho("\n<dim>Type 'module help' for commands<reset>\n")
+  cecho("\n<DimGrey>Type 'module help' for commands<reset>\n")
 end
 
 -- Show configuration
@@ -726,7 +731,7 @@ end
 function ModuleManager:showHelp()
   cecho([[
 <green>==== EMERGE Module System ====<reset>
-<dim>Emergent Modular Engagement & Response Generation Engine<reset>
+<DimGrey>Emergent Modular Engagement & Response Generation Engine<reset>
 
 <yellow>Core Commands:<reset>
   <cyan>emodule list<reset>             List all modules (loaded & available)
@@ -750,17 +755,17 @@ function ModuleManager:showHelp()
   <cyan>emodule help<reset>             Show this help (or just 'emodule')
 
 <yellow>Examples:<reset>
-  <dim>Add from GitHub:<reset>
+  <DimGrey>Add from GitHub:<reset>
   emodule github rjm11/mudlet-combat-module
   emodule github https://github.com/user/repo
   
-  <dim>Manual add:<reset>
+  <DimGrey>Manual add:<reset>
   emodule add mymod {"name":"My Module","github":{"owner":"me","repo":"my-mod","file":"mod.lua"}}
   
-  <dim>Private repos:<reset>
+  <DimGrey>Private repos:<reset>
   emodule token ghp_your_github_personal_access_token
 
-<dim>Configuration saved to: ]] .. self.paths.config .. [[<reset>
+<DimGrey>Configuration saved to: ]] .. self.paths.config .. [[<reset>
 ]])
 end
 
@@ -790,14 +795,14 @@ function ModuleManager:showBootup()
 ]])
   
   cecho("<yellow>    Emergent Modular Engagement & Response Generation Engine<reset>\n")
-  cecho(string.format("<dim>    Version %s | Event-Driven Architecture<reset>\n\n", self.version))
+  cecho(string.format("<DimGrey>    Version %s | Event-Driven Architecture<reset>\n\n", self.version))
   
   -- Bootup sequence
   local steps = {
-    {delay = 0.2, msg = "<dim>[BOOT]<reset> Initializing EMERGE framework..."},
-    {delay = 0.4, msg = "<dim>[BOOT]<reset> Loading configuration from " .. self.paths.config:match("/([^/]+)$")},
-    {delay = 0.6, msg = "<dim>[BOOT]<reset> Verifying module registry..."},
-    {delay = 0.8, msg = "<dim>[BOOT]<reset> Establishing event system..."},
+    {delay = 0.2, msg = "<DimGrey>[BOOT]<reset> Initializing EMERGE framework..."}, 
+    {delay = 0.4, msg = "<DimGrey>[BOOT]<reset> Loading configuration from " .. self.paths.config:match("/([^/]+)$")},
+    {delay = 0.6, msg = "<DimGrey>[BOOT]<reset> Verifying module registry..."},
+    {delay = 0.8, msg = "<DimGrey>[BOOT]<reset> Establishing event system..."},
     {delay = 1.0, msg = "<green>[BOOT] System ready<reset>"},
   }
   
@@ -811,7 +816,7 @@ function ModuleManager:showBootup()
           if self.config.first_run == nil or self.config.first_run then
             self:showIntroduction()
           else
-            cecho("\n<dim>Type 'emodule intro' to see the introduction again<reset>\n")
+            cecho("\n<DimGrey>Type 'emodule intro' to see the introduction again<reset>\n")
             self:checkCoreModules()
           end
         end)
@@ -865,27 +870,51 @@ function ModuleManager:checkCoreModules()
   if core_missing or gmcp_missing then
     cecho("<yellow>==== Module Setup Required ====<reset>\n\n")
     
-    if core_missing then
-      cecho("<red>MISSING: EMERGE Core Module (REQUIRED)<reset>\n")
-      cecho("The core module provides the event system that all other modules depend on.\n")
-      cecho("<cyan>To install: emodule load core<reset>\n\n")
+    -- Check if token is set
+    if not self.config.github_token then
+      cecho("<red>IMPORTANT: GitHub Token Required<reset>\n")
+      cecho("The EMERGE modules are hosted in a private repository.\n")
+      cecho("You need a GitHub personal access token to download them.\n\n")
+      
+      cecho("<yellow>Step 1: Create a GitHub Token<reset>\n")
+      cecho("  1. Go to https://github.com/settings/tokens\n")
+      cecho("  2. Click 'Generate new token (classic)'\n")
+      cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
+      cecho("  4. Select the 'repo' scope\n")
+      cecho("  5. Click 'Generate token' and copy it\n\n")
+      
+      cecho("<yellow>Step 2: Set Your Token<reset>\n")
+      cecho("  <cyan>emodule token YOUR_TOKEN_HERE<reset>\n\n")
+      
+      cecho("<yellow>Step 3: Load Core Modules<reset>\n")
+      cecho("  <cyan>emodule load core<reset> - Required event system\n")
+      cecho("  <cyan>emodule load gmcp<reset> - Game data handler\n\n")
+      
+      cecho("<DimGrey>Need help? Visit: https://github.com/rjm11/emerge/wiki<reset>\n")
+    else
+      -- Token is set, show regular missing module messages
+      if core_missing then
+        cecho("<red>MISSING: EMERGE Core Module (REQUIRED)<reset>\n")
+        cecho("The core module provides the event system that all other modules depend on.\n")
+        cecho("<cyan>To install: emodule load core<reset>\n\n")
+      end
+      
+      if gmcp_missing then
+        cecho("<yellow>MISSING: GMCP Handler Module (Highly Recommended)<reset>\n")
+        cecho("GMCP provides vital game data that most modules need to function properly.\n")
+        cecho("<cyan>To install: emodule load gmcp<reset>\n\n")
+      end
+      
+      cecho("<DimGrey>After installing core modules, run 'emodule list' to see available modules<reset>\n")
+      cecho("<DimGrey>Visit the wiki for more information: https://github.com/rjm11/emerge/wiki<reset>\n")
     end
-    
-    if gmcp_missing then
-      cecho("<yellow>MISSING: GMCP Handler Module (Highly Recommended)<reset>\n")
-      cecho("GMCP provides vital game data that most modules need to function properly.\n")
-      cecho("<cyan>To install: emodule load gmcp<reset>\n\n")
-    end
-    
-    cecho("<dim>After installing core modules, run 'emodule list' to see available modules<reset>\n")
-    cecho("<dim>Visit the wiki for more information: https://github.com/rjm11/emerge/wiki<reset>\n")
   else
     cecho("<green>✓ Core modules loaded successfully<reset>\n\n")
     cecho("<cyan>Quick Commands:<reset>\n")
     cecho("  emodule list    - See all available modules\n")
     cecho("  emodule help    - View all commands\n")
     cecho("  emodule github  - Add modules from GitHub\n\n")
-    cecho("<dim>Visit the wiki: https://github.com/rjm11/emerge/wiki<reset>\n")
+    cecho("<DimGrey>Visit the wiki: https://github.com/rjm11/emerge/wiki<reset>\n")
   end
 end
 
