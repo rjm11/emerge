@@ -577,44 +577,79 @@ function ModuleManager:upgradeSelf()
     end
     
     local check_file = self.paths.cache .. "manager-update-check.lua"
-    downloadFile(check_file, url, headers)
     
-    registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
+    -- Store handlers to ensure they can be killed
+    local downloadHandler, errorHandler, timeoutHandler
+    
+    -- Set up timeout
+    timeoutHandler = tempTimer(10, function()
+      cecho("<IndianRed>[EMERGE] Update check timed out. Please try again.<reset>\n")
+      if downloadHandler then killAnonymousEventHandler(downloadHandler) end
+      if errorHandler then killAnonymousEventHandler(errorHandler) end
+    end)
+    
+    downloadHandler = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
       if filename == check_file then
+        -- Cancel timeout
+        if timeoutHandler then killTimer(timeoutHandler) end
+        if errorHandler then killAnonymousEventHandler(errorHandler) end
+        
         local file = io.open(filename, "r")
         if file then
           local content = file:read("*all")
           file:close()
           
+          -- Look for version in the file
           local remote_version = content:match('local CURRENT_VERSION = "([^"]+)"')
-          if remote_version and remote_version ~= self.version then
-            cecho(string.format("<DarkOrange>[EMERGE] Update available: v%s -> v%s<reset>\n",
-              self.version, remote_version))
-            
-            self.pending_update = {
-              version = remote_version,
-              content = content
-            }
-            
-            -- Now do the upgrade
-            self:doUpgrade()
-            
-          elseif remote_version == self.version then
-            cecho("<LightSteelBlue>[EMERGE] You already have the latest version (v" .. self.version .. ")<reset>\n")
+          if not remote_version then
+            -- Try alternate format
+            remote_version = content:match('CURRENT_VERSION = "([^"]+)"')
+          end
+          if not remote_version then
+            -- Try another format
+            remote_version = content:match('version = "([^"]+)"')
+          end
+          
+          if remote_version then
+            if remote_version ~= self.version then
+              cecho(string.format("<DarkOrange>[EMERGE] Update available: v%s -> v%s<reset>\n",
+                self.version, remote_version))
+              
+              self.pending_update = {
+                version = remote_version,
+                content = content
+              }
+              
+              -- Now do the upgrade
+              self:doUpgrade()
+            else
+              cecho("<LightSteelBlue>[EMERGE] You already have the latest version (v" .. self.version .. ")<reset>\n")
+            end
           else
-            cecho("<IndianRed>[EMERGE] Could not determine remote version<reset>\n")
+            cecho("<IndianRed>[EMERGE] Could not determine remote version from downloaded file<reset>\n")
+            cecho("<DimGrey>Debug: File size = " .. #content .. " bytes<reset>\n")
           end
           
           os.remove(filename)
+        else
+          cecho("<IndianRed>[EMERGE] Could not read downloaded file<reset>\n")
         end
       end
     end, true)
     
-    registerAnonymousEventHandler("sysDownloadError", function(_, filename)
+    errorHandler = registerAnonymousEventHandler("sysDownloadError", function(_, filename, errorMsg)
       if filename == check_file then
-        cecho("<IndianRed>[EMERGE] Failed to check for updates. Check your internet connection.<reset>\n")
+        -- Cancel timeout
+        if timeoutHandler then killTimer(timeoutHandler) end
+        if downloadHandler then killAnonymousEventHandler(downloadHandler) end
+        
+        cecho("<IndianRed>[EMERGE] Failed to download update: " .. (errorMsg or "unknown error") .. "<reset>\n")
+        cecho("<DimGrey>URL: " .. url .. "<reset>\n")
       end
     end, true)
+    
+    -- Initiate the download
+    downloadFile(check_file, url, headers)
     
     return
   end
