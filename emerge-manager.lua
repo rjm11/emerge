@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.1
+-- Version: 0.5.2
 
-local CURRENT_VERSION = "0.5.1"
+local CURRENT_VERSION = "0.5.2"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -559,11 +559,13 @@ function ModuleManager:upgradeSelf()
   if not self.pending_update then
     cecho("<DimGrey>[EMERGE] Checking for updates...<reset>\n")
     
-    local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
+    -- Add timestamp to bypass GitHub's cache
+    local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s?t=%d",
       self.github.owner,
       self.github.repo, 
       self.github.branch,
-      self.github.files.manager)
+      self.github.files.manager,
+      os.time())
     
     -- Add headers for private repos if token is available
     local headers = {}
