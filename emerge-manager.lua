@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.0.8
+-- Version: 1.0.9
 
-local CURRENT_VERSION = "1.0.8"
+local CURRENT_VERSION = "1.0.9"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -223,6 +223,11 @@ end
 
 -- Add module from GitHub URL
 function ModuleManager:addGitHub(github_url)
+  if not github_url or github_url == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule github <owner/repo or github.com/owner/repo><reset>\n")
+    return
+  end
+  
   -- Parse GitHub URL formats:
   -- https://github.com/owner/repo
   -- https://github.com/owner/repo.git
@@ -327,6 +332,11 @@ end
 
 -- Remove custom module
 function ModuleManager:removeModule(module_id)
+  if not module_id or module_id == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule remove <module_id><reset>\n")
+    return
+  end
+  
   -- Check if it's a custom module
   if not self.custom_modules[module_id] then
     -- Check if it exists in default registry
@@ -358,6 +368,12 @@ end
 
 -- Enable/disable a module
 function ModuleManager:toggleModule(module_id, enabled)
+  if not module_id or module_id == "" then
+    local cmd = enabled and "enable" or "disable"
+    cecho(string.format("<IndianRed>[EMERGE] Usage: emodule %s <module_id><reset>\n", cmd))
+    return
+  end
+  
   local modules = self:getModuleList()
   local module = modules[module_id]
   
@@ -390,9 +406,15 @@ end
 
 -- Load a module from GitHub
 function ModuleManager:loadModule(module_id)
+  if not module_id or module_id == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule load <module_id><reset>\n")
+    return
+  end
+  
   local module_info = self:getModuleList()[module_id]
   if not module_info then
     cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
+    cecho("<DimGrey>Try 'emodule list' to see available modules<reset>\n")
     return
   end
   
@@ -445,6 +467,11 @@ end
 
 -- Unload a module
 function ModuleManager:unloadModule(module_id)
+  if not module_id or module_id == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule unload <module_id><reset>\n")
+    return
+  end
+  
   -- Special handling for unloading the manager itself
   if module_id == "manager" or module_id == "emerge" then
     cecho("<DarkOrange>[EMERGE] Unloading module manager...<reset>\n")
@@ -464,6 +491,13 @@ function ModuleManager:unloadModule(module_id)
     if io.exists(manager_file) then
       os.remove(manager_file)
       cecho("<DarkOrange>[EMERGE] Removed saved manager file<reset>\n")
+    end
+    
+    -- Also remove the downloaded file if it exists
+    local dl_file = getMudletHomeDir() .. "/emerge-dl.lua"
+    if io.exists(dl_file) then
+      os.remove(dl_file)
+      cecho("<DarkOrange>[EMERGE] Removed download file<reset>\n")
     end
     
     -- Unload self
@@ -814,11 +848,17 @@ end
 
 -- Add module via command
 function ModuleManager:addModuleCommand(id, json_str)
+  if not id or id == "" or not json_str or json_str == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule add <id> <json_config><reset>\n")
+    return
+  end
+  
   local ok, module_info = pcall(yajl.to_value, json_str)
   if ok and module_info then
     self:addModule(id, module_info)
   else
     cecho("<IndianRed>[EMERGE] Invalid JSON format<reset>\n")
+    cecho("<DimGrey>Example: emodule add mymod {\"name\":\"My Module\",\"github\":{\"owner\":\"me\",\"repo\":\"my-mod\",\"file\":\"mod.lua\"}}<reset>\n")
   end
 end
 
