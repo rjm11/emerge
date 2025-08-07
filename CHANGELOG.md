@@ -5,6 +5,27 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2025-08-07
+
+### Fixed
+- **CRITICAL**: Fixed race condition in `checkAllUpdates()` function
+- `emodule update` now properly waits for async operations to complete
+- Manager update checks no longer use stale cache data (force refresh)
+- Added proper timeout protection (10s total, 8s per download)
+- Fixed race where `pending_update` was evaluated before download completion
+
+### Changed
+- Replaced fixed 3-second timer with proper event-driven async coordination
+- `checkSelfUpdate()` now delegates to new async version for consistency
+- Cache refresh now forces fresh data during update checks (`force=true`)
+- Improved error messages with timeout and network issue detection
+
+### Added
+- New `checkSelfUpdateAsync()` method with callback-based completion
+- Completion state tracking to coordinate multiple async operations
+- Individual download timeout protection with cleanup
+- Better debug output showing progress of async operations
+
 ## [0.5.6] - 2025-08-07
 
 ### Fixed

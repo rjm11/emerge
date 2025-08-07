@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.6
+-- Version: 0.5.7
 
-local CURRENT_VERSION = "0.5.6"
+local CURRENT_VERSION = "0.5.7"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -667,73 +667,49 @@ function ModuleManager:unloadModule(module_id, confirm)
   end
 end
 
--- Check all modules for updates
+-- Check all modules for updates (with proper async coordination)
 function ModuleManager:checkAllUpdates()
   cecho("<DarkOrange>[EMERGE] Checking manager and all modules for updates...<reset>\n")
-  
-  -- Check manager first
-  cecho("<DimGrey>[EMERGE] Checking manager version...<reset>\n")
-  local manager_update_available = false
   
   -- Store original silent mode
   local was_silent = self.silent_check
   self.silent_check = true
   
-  -- Check manager updates
-  tempTimer(0.5, function()
-    self:checkSelfUpdate()
+  -- Track completion state
+  local completion_state = {
+    manager_check_done = false,
+    cache_refresh_done = false,
+    timeout_reached = false
+  }
+  
+  -- Reset pending update state
+  self.pending_update = nil
+  
+  -- Force fresh cache for update checks (no stale data)
+  cecho("<DimGrey>[EMERGE] Refreshing module cache...<reset>\n")
+  self:refreshCache(true)
+  completion_state.cache_refresh_done = true
+  
+  -- Check manager version with async coordination
+  cecho("<DimGrey>[EMERGE] Checking manager version...<reset>\n")
+  self:checkSelfUpdateAsync(function(update_available)
+    completion_state.manager_check_done = true
+    self:_evaluateUpdateResults(completion_state, was_silent)
   end)
   
-  -- Refresh module cache to get latest versions  
-  self:refreshCache(false)
-  
-  -- Check for module updates using discovery cache
-  tempTimer(3, function() -- Wait for cache refresh and manager check
-    cecho("<DimGrey>[EMERGE] Checking module versions...<reset>\n")
-    local updates = self:checkForUpdates()
-    
-    local total_updates = #updates
-    if self.pending_update then
-      total_updates = total_updates + 1
-    end
-    
-    if total_updates > 0 then
-      cecho(string.format("\n<yellow>[EMERGE] %d update(s) available:<reset>\n", total_updates))
-      
-      -- Show manager update if available
-      if self.pending_update then
-        cecho(string.format("  <SteelBlue>emerge-manager<reset>: v%s → v%s\n",
-          self.version, self.pending_update.version))
-      end
-      
-      -- Show module updates
-      for _, update in ipairs(updates) do
-        cecho(string.format("  <SteelBlue>%s<reset>: v%s → v%s (%s)\n",
-          update.id, update.current, update.available, update.repository))
-      end
-      
-      cecho("\n<DimGrey>Commands:<reset>\n")
-      cecho("<DimGrey>  emodule upgrade manager  # Update the manager<reset>\n")
-      cecho("<DimGrey>  emodule upgrade <module> # Update a specific module<reset>\n")
-      cecho("<DimGrey>  emodule upgrade all      # Update everything<reset>\n")
-    else
-      cecho("<LightSteelBlue>[EMERGE] All components are up to date<reset>\n")
-    end
-    
-    -- Restore silent mode
-    self.silent_check = was_silent
-    
-    -- Check each loaded module for custom update methods
-    for id, module in pairs(self.modules) do
-      if module.checkForUpdates then
-        module:checkForUpdates(true)
-      end
+  -- Timeout protection (fallback after 10 seconds)
+  tempTimer(10, function()
+    if not completion_state.manager_check_done then
+      cecho("<yellow>[EMERGE] Manager check timed out - network issues?<reset>\n")
+      completion_state.manager_check_done = true
+      completion_state.timeout_reached = true
+      self:_evaluateUpdateResults(completion_state, was_silent)
     end
   end)
 end
 
--- Check for ModuleManager updates
-function ModuleManager:checkSelfUpdate()
+-- Async version of checkSelfUpdate that uses callbacks
+function ModuleManager:checkSelfUpdateAsync(callback)
   local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
     self.github.owner,
     self.github.repo,
@@ -746,33 +722,119 @@ function ModuleManager:checkSelfUpdate()
     headers["Authorization"] = "token " .. self.config.github_token
   end
   
-  downloadFile(self.paths.cache .. "module-manager-check.lua", url, headers)
+  -- Generate unique filename to avoid conflicts
+  local check_file = self.paths.cache .. "module-manager-check-" .. os.time() .. ".lua"
   
-  registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
-    if filename:find("module-manager-check%.lua$") then
+  -- Download with event handler
+  downloadFile(check_file, url, headers)
+  
+  -- Set up one-time event handler for this specific download
+  local downloadHandler
+  downloadHandler = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
+    if filename == check_file then
+      -- Clean up this handler
+      killAnonymousEventHandler(downloadHandler)
+      
       local file = io.open(filename, "r")
       if file then
         local content = file:read("*all")
         file:close()
         
+        -- Clean up temp file
+        os.remove(filename)
+        
         local remote_version = content:match('local CURRENT_VERSION = "([^"]+)"')
         if remote_version and remote_version ~= self.version then
-          cecho(string.format("<DarkOrange>[EMERGE] Update available: v%s -> v%s<reset>\n",
-            self.version, remote_version))
-          cecho("<SteelBlue>Run 'module upgrade manager' to update<reset>\n")
+          if not self.silent_check then
+            cecho(string.format("<DarkOrange>[EMERGE] Manager update available: v%s -> v%s<reset>\n",
+              self.version, remote_version))
+          end
           
           self.pending_update = {
             version = remote_version,
             content = content
           }
-        elseif remote_version == self.version then
-          if not self.silent_check then
-            cecho("<LightSteelBlue>[EMERGE] You have the latest version<reset>\n")
+          callback(true)
+        else
+          if not self.silent_check and remote_version == self.version then
+            cecho("<DimGrey>[EMERGE] Manager is up to date<reset>\n")
           end
+          callback(false)
         end
+      else
+        cecho("<yellow>[EMERGE] Failed to check manager version<reset>\n")
+        callback(false)
       end
     end
-  end, true) -- one-time handler
+  end)
+  
+  -- Timeout protection for individual download
+  tempTimer(8, function()
+    if downloadHandler then
+      killAnonymousEventHandler(downloadHandler)
+      cecho("<yellow>[EMERGE] Manager version check timed out<reset>\n")
+      callback(false)
+    end
+  end)
+end
+
+-- Evaluate results once async operations complete
+function ModuleManager:_evaluateUpdateResults(completion_state, was_silent)
+  -- Only proceed if all operations are done
+  if not (completion_state.manager_check_done and completion_state.cache_refresh_done) then
+    return
+  end
+  
+  cecho("<DimGrey>[EMERGE] Checking module versions...<reset>\n")
+  local updates = self:checkForUpdates()
+  
+  local total_updates = #updates
+  if self.pending_update then
+    total_updates = total_updates + 1
+  end
+  
+  if total_updates > 0 then
+    cecho(string.format("\n<yellow>[EMERGE] %d update(s) available:<reset>\n", total_updates))
+    
+    -- Show manager update if available
+    if self.pending_update then
+      cecho(string.format("  <SteelBlue>emerge-manager<reset>: v%s → v%s\n",
+        self.version, self.pending_update.version))
+    end
+    
+    -- Show module updates
+    for _, update in ipairs(updates) do
+      cecho(string.format("  <SteelBlue>%s<reset>: v%s → v%s (%s)\n",
+        update.id, update.current, update.available, update.repository))
+    end
+    
+    cecho("\n<DimGrey>Commands:<reset>\n")
+    cecho("<DimGrey>  emodule upgrade manager  # Update the manager<reset>\n")
+    cecho("<DimGrey>  emodule upgrade <module> # Update a specific module<reset>\n")
+    cecho("<DimGrey>  emodule upgrade all      # Update everything<reset>\n")
+  else
+    cecho("<LightSteelBlue>[EMERGE] All components are up to date<reset>\n")
+  end
+  
+  -- Restore silent mode
+  self.silent_check = was_silent
+  
+  -- Check each loaded module for custom update methods
+  for id, module in pairs(self.modules) do
+    if module.checkForUpdates then
+      module:checkForUpdates(true)
+    end
+  end
+end
+
+-- Check for ModuleManager updates (legacy synchronous version)
+function ModuleManager:checkSelfUpdate()
+  -- Delegate to the new async version for consistency
+  self:checkSelfUpdateAsync(function(update_available)
+    if update_available then
+      cecho("<SteelBlue>Run 'emodule upgrade manager' to update<reset>\n")
+    end
+  end)
 end
 
 -- Upgrade modules or manager
