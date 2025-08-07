@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.0
+-- Version: 0.5.1
 
-local CURRENT_VERSION = "0.5.0"
+local CURRENT_VERSION = "0.5.1"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1498,13 +1498,13 @@ function ModuleManager:listModules()
   
   -- Using 100-character width for consistent formatting
   cecho("\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
-  cecho("<LightSteelBlue>                                      EMERGE Module System<reset>\n")
+  cecho("<LightSteelBlue>                                    🚀 EMERGE Module System<reset>\n")
   cecho("<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n\n")
   
   -- Show currently loaded modules
   cecho("<LightSteelBlue>● Currently Loaded Modules<reset>\n")
   cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
-  cecho(string.format("  <SteelBlue>emerge-manager<reset> v%s <DimGrey>(core system)<reset>\n", self.version))
+  cecho(string.format("  <SteelBlue>emerge-manager<reset> <DimGrey>v%s</reset> <yellow>● <DimGrey>core system<reset>\n", self.version))
   
   if next(self.modules) then
     for id, module in pairs(self.modules) do
@@ -1580,7 +1580,7 @@ function ModuleManager:listModules()
     for _, repo in ipairs(repos) do
       local modules = required_by_repo[repo]
       if #modules > 0 then
-        cecho(string.format("\n  <DarkGrey>%s:<reset>\n", repo))
+        cecho(string.format("\n  <DimGrey>── %s ──<reset>\n", repo))
         for _, entry in ipairs(modules) do
           local id = entry.id
           local info = entry.info
@@ -1598,7 +1598,7 @@ function ModuleManager:listModules()
       end
     end
     
-    cecho("\n  <LightBlue>→ Quick load all: <SteelBlue>emodule load required<reset>\n")
+    cecho("\n  <SlateGray>💡 <LightBlue>Quick start: <SteelBlue>emodule load required<reset>\n")
   end
   
   -- Count total optional modules
@@ -1622,7 +1622,7 @@ function ModuleManager:listModules()
     for _, repo in ipairs(repos) do
       local modules = optional_by_repo[repo]
       if #modules > 0 then
-        cecho(string.format("\n  <DarkGrey>%s:<reset>\n", repo))
+        cecho(string.format("\n  <DimGrey>── %s ──<reset>\n", repo))
         for _, entry in ipairs(modules) do
           local id = entry.id
           local info = entry.info
@@ -1648,13 +1648,13 @@ function ModuleManager:listModules()
   
   -- Show helpful footer
   cecho("\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
-  cecho("<DimGrey>Commands: <SteelBlue>emodule load <module><reset> | <SteelBlue>emodule help<reset> | <SteelBlue>emodule update<reset>\n")
+  cecho("<DimGrey>📋 Commands: <SteelBlue>emodule load <module><reset> <DimGrey>│</reset> <SteelBlue>emodule help<reset> <DimGrey>│</reset> <SteelBlue>emodule update<reset>\n")
   
   -- Show cache status
   local cache_age = os.time() - self.discovery_cache.last_refresh
   if self.discovery_cache.last_refresh > 0 then
-    cecho(string.format("<DimGrey>Module list updated: %d minutes ago<reset>\n", 
-      math.floor(cache_age / 60)))
+    cecho(string.format("<DimGrey>🕒 Last updated: %d minutes ago <DimGrey>│</reset> <yellow>⚠️  Beta v%s<reset>\n", 
+      math.floor(cache_age / 60), self.version))
   end
 end
 
