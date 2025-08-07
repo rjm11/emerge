@@ -10,7 +10,8 @@
       "description": "EMERGE module manager with GitHub discovery",
       "author": "EMERGE Team",
       "dependencies": [],
-      "changelog": "Added full repository discovery, manifest support, and multi-repo functionality"
+      "changelog_file": "CHANGELOG.md",
+      "changelog": "See CHANGELOG.md for detailed version history"
     }
   }
 }
