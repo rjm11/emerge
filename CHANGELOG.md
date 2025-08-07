@@ -5,6 +5,19 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.1] - 2025-08-07
+
+### Changed
+- Standardized all displays to use 100-character width for consistency
+- Repository grouping restored for both Required and Optional modules
+- Both module sections now use identical formatting with repository headers
+- Updated all separator lines to match 100-character width
+
+### Improved
+- Visual consistency across all EMERGE displays
+- Module organization by repository for better clarity
+- Cleaner, more professional appearance with fixed width
+
 ## [1.3.0] - 2025-08-07
 
 ### Added

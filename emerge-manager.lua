@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.3.0
+-- Version: 1.3.1
 
-local CURRENT_VERSION = "1.3.0"
+local CURRENT_VERSION = "1.3.1"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1086,9 +1086,9 @@ end
 
 -- List configured repositories
 function ModuleManager:listRepositories()
-  cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
-  cecho("<LightSteelBlue>Configured Repositories<reset>\n")
-  cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
+  cecho("\n<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
+  cecho("<LightSteelBlue>                                    Configured Repositories<reset>\n")
+  cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n\n")
   
   for i, repo in ipairs(self.repositories) do
     local status_icon = repo.public and "<green>●<reset>" or "<yellow>●<reset>"
@@ -1496,13 +1496,14 @@ function ModuleManager:listModules()
     self.config.debug = old_debug
   end
   
-  cecho("\n<SlateGray>═══════════════════════════════════════════════════<reset>\n")
-  cecho("<LightSteelBlue>             EMERGE Module System<reset>\n")
-  cecho("<SlateGray>═══════════════════════════════════════════════════<reset>\n\n")
+  -- Using 100-character width for consistent formatting
+  cecho("\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
+  cecho("<LightSteelBlue>                                      EMERGE Module System<reset>\n")
+  cecho("<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n\n")
   
   -- Show currently loaded modules
   cecho("<LightSteelBlue>● Currently Loaded Modules<reset>\n")
-  cecho("<SlateGray>──────────────────────────────────────<reset>\n")
+  cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
   cecho(string.format("  <SteelBlue>emerge-manager<reset> v%s <DimGrey>(core system)<reset>\n", self.version))
   
   if next(self.modules) then
@@ -1522,10 +1523,10 @@ function ModuleManager:listModules()
     cecho("  <DimGrey>No additional modules loaded<reset>\n")
   end
   
-  -- Separate required and optional modules
+  -- Separate and organize modules by repository and type
   local all_modules = self:getModuleList()
-  local required_modules = {}
-  local optional_modules = {}
+  local required_by_repo = {}
+  local optional_by_repo = {}
   
   for id, info in pairs(all_modules) do
     -- Skip if module is already loaded (including the manager itself)
@@ -1538,79 +1539,115 @@ function ModuleManager:listModules()
         is_required = true
       end
       
+      local repo = info.repository or "unknown"
+      
       if is_required then
-        table.insert(required_modules, {id = id, info = info})
+        required_by_repo[repo] = required_by_repo[repo] or {}
+        table.insert(required_by_repo[repo], {id = id, info = info})
       else
-        table.insert(optional_modules, {id = id, info = info})
+        optional_by_repo[repo] = optional_by_repo[repo] or {}
+        table.insert(optional_by_repo[repo], {id = id, info = info})
       end
     end
   end
   
-  -- Sort modules by name
-  table.sort(required_modules, function(a, b) return a.id < b.id end)
-  table.sort(optional_modules, function(a, b) return a.id < b.id end)
+  -- Sort modules within each repo
+  for repo, modules in pairs(required_by_repo) do
+    table.sort(modules, function(a, b) return a.id < b.id end)
+  end
+  for repo, modules in pairs(optional_by_repo) do
+    table.sort(modules, function(a, b) return a.id < b.id end)
+  end
   
-  -- Show required modules
-  if #required_modules > 0 then
+  -- Count total required modules
+  local total_required = 0
+  for _, modules in pairs(required_by_repo) do
+    total_required = total_required + #modules
+  end
+  
+  -- Show required modules grouped by repository
+  if total_required > 0 then
     cecho("\n<LightSteelBlue>● Required Modules<reset> <DimGrey>(essential for combat system)<reset>\n")
-    cecho("<SlateGray>──────────────────────────────────────<reset>\n")
+    cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
     
-    for _, entry in ipairs(required_modules) do
-      local id = entry.id
-      local info = entry.info
-      
-      local version_info = ""
-      if info.version then
-        version_info = " v" .. info.version
+    -- Sort repositories for consistent display
+    local repos = {}
+    for repo in pairs(required_by_repo) do
+      table.insert(repos, repo)
+    end
+    table.sort(repos)
+    
+    for _, repo in ipairs(repos) do
+      local modules = required_by_repo[repo]
+      if #modules > 0 then
+        cecho(string.format("\n  <DarkGrey>%s:<reset>\n", repo))
+        for _, entry in ipairs(modules) do
+          local id = entry.id
+          local info = entry.info
+          
+          local version_info = ""
+          if info.version then
+            version_info = " v" .. info.version
+          end
+          
+          local desc = info.name or info.description or "No description"
+          
+          cecho(string.format("    <green>◆<reset> <SteelBlue>%s<reset>%s - %s\n", 
+            id, version_info, desc))
+        end
       end
-      
-      local repo_info = ""
-      if info.repository then
-        repo_info = string.format(" <DimGrey>(%s)<reset>", info.repository)
-      end
-      
-      local desc = info.name or info.description or "No description"
-      
-      cecho(string.format("  <green>◆<reset> <SteelBlue>%s<reset>%s - %s%s\n", 
-        id, version_info, desc, repo_info))
     end
     
     cecho("\n  <LightBlue>→ Quick load all: <SteelBlue>emodule load required<reset>\n")
   end
   
-  -- Show optional modules
-  if #optional_modules > 0 then
+  -- Count total optional modules
+  local total_optional = 0
+  for _, modules in pairs(optional_by_repo) do
+    total_optional = total_optional + #modules
+  end
+  
+  -- Show optional modules grouped by repository
+  if total_optional > 0 then
     cecho("\n<LightSteelBlue>● Optional Modules<reset> <DimGrey>(additional features)<reset>\n")
-    cecho("<SlateGray>──────────────────────────────────────<reset>\n")
+    cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
     
-    for _, entry in ipairs(optional_modules) do
-      local id = entry.id
-      local info = entry.info
-      
-      local version_info = ""
-      if info.version then
-        version_info = " v" .. info.version
+    -- Sort repositories for consistent display
+    local repos = {}
+    for repo in pairs(optional_by_repo) do
+      table.insert(repos, repo)
+    end
+    table.sort(repos)
+    
+    for _, repo in ipairs(repos) do
+      local modules = optional_by_repo[repo]
+      if #modules > 0 then
+        cecho(string.format("\n  <DarkGrey>%s:<reset>\n", repo))
+        for _, entry in ipairs(modules) do
+          local id = entry.id
+          local info = entry.info
+          
+          local version_info = ""
+          if info.version then
+            version_info = " v" .. info.version
+          end
+          
+          local desc = info.name or info.description or "No description"
+          
+          cecho(string.format("    <yellow>◇<reset> <SteelBlue>%s<reset>%s - %s\n", 
+            id, version_info, desc))
+        end
       end
-      
-      local repo_info = ""
-      if info.repository then
-        repo_info = string.format(" <DimGrey>(%s)<reset>", info.repository)
-      end
-      
-      local desc = info.name or info.description or "No description"
-      
-      cecho(string.format("  <yellow>◇<reset> <SteelBlue>%s<reset>%s - %s%s\n", 
-        id, version_info, desc, repo_info))
     end
   end
   
-  if #required_modules == 0 and #optional_modules == 0 then
+  if total_required == 0 and total_optional == 0 then
     cecho("\n<DimGrey>No additional modules available<reset>\n")
     cecho("<DimGrey>Try 'emodule refresh' to update module list<reset>\n")
   end
   
   -- Show helpful footer
-  cecho("\n<SlateGray>═══════════════════════════════════════════════════<reset>\n")
+  cecho("\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
   cecho("<DimGrey>Commands: <SteelBlue>emodule load <module><reset> | <SteelBlue>emodule help<reset> | <SteelBlue>emodule update<reset>\n")
   
   -- Show cache status
