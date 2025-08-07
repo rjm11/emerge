@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.2
+-- Version: 0.5.3
 
-local CURRENT_VERSION = "0.5.2"
+local CURRENT_VERSION = "0.5.3"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1624,7 +1624,7 @@ function ModuleManager:listModules()
   -- Show currently loaded modules
   cecho("<LightSteelBlue>● Currently Loaded Modules<reset>\n")
   cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
-  cecho(string.format("  <SteelBlue>emerge-manager<reset> <DimGrey>v%s</reset> <yellow>● <DimGrey>core system<reset>\n", self.version))
+  cecho(string.format("  <SteelBlue>emerge-manager<reset> <DimGrey>v%s<reset> <yellow>●<reset> <DimGrey>core system<reset>\n", self.version))
   
   if next(self.modules) then
     for id, module in pairs(self.modules) do
@@ -1768,12 +1768,12 @@ function ModuleManager:listModules()
   
   -- Show helpful footer
   cecho("\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
-  cecho("<DimGrey>📋 Commands: <SteelBlue>emodule load <module><reset> <DimGrey>│</reset> <SteelBlue>emodule help<reset> <DimGrey>│</reset> <SteelBlue>emodule update<reset>\n")
+  cecho("<DimGrey>📋 Commands: <SteelBlue>emodule load <module><reset> <DimGrey>│<reset> <SteelBlue>emodule help<reset> <DimGrey>│<reset> <SteelBlue>emodule update<reset>\n")
   
   -- Show cache status
   local cache_age = os.time() - self.discovery_cache.last_refresh
   if self.discovery_cache.last_refresh > 0 then
-    cecho(string.format("<DimGrey>🕒 Last updated: %d minutes ago <DimGrey>│</reset> <yellow>⚠️  Beta v%s<reset>\n", 
+    cecho(string.format("<DimGrey>🕒 Last updated: %d minutes ago<reset> <DimGrey>│<reset> <yellow>⚠️  Beta v%s<reset>\n", 
       math.floor(cache_age / 60), self.version))
   end
 end
