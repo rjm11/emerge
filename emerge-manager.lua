@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.2.2
+-- Version: 1.3.0
 
-local CURRENT_VERSION = "1.2.2"
+local CURRENT_VERSION = "1.3.0"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -448,9 +448,10 @@ function ModuleManager:loadRequiredModules()
 end
 
 -- Load a module from GitHub
-function ModuleManager:loadModule(module_id)
+function ModuleManager:loadModule(module_id, custom_branch)
   if not module_id or module_id == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule load <module_id><reset>\n")
+    cecho("<DimGrey>Or: emodule load <branch> <module_id><reset>\n")
     return
   end
   
@@ -467,6 +468,14 @@ function ModuleManager:loadModule(module_id)
     return
   end
   
+  -- Use custom branch if provided, otherwise use module's default branch
+  local branch = custom_branch or module_info.github.branch or "main"
+  
+  -- Show branch info if custom branch is being used
+  if custom_branch then
+    cecho(string.format("<yellow>[EMERGE] Using branch: %s<reset>\n", custom_branch))
+  end
+  
   -- Build URL based on manifest path or fallback to old method
   local url
   if module_info.manifest_path then
@@ -474,14 +483,14 @@ function ModuleManager:loadModule(module_id)
     url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
       module_info.github.owner,
       module_info.github.repo,
-      module_info.github.branch or "main",
+      branch,
       module_info.manifest_path)
   else
     -- Fallback to original method
     url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
       module_info.github.owner,
       module_info.github.repo,
-      module_info.github.branch or "main",
+      branch,
       module_info.github.file)
   end
   
@@ -1407,10 +1416,17 @@ function ModuleManager:createAliases()
   -- Module management commands
   self.aliases.list = tempAlias("^emodule list$", [[EMERGE:listModules()]])
   self.aliases.load = tempAlias("^emodule load (.+)$", [[
-    if matches[2] == "required" then
+    local args = matches[2]
+    if args == "required" then
       EMERGE:loadRequiredModules()
     else
-      EMERGE:loadModule(matches[2])
+      -- Check for branch syntax: "branch-name module-name"
+      local branch, module = args:match("^([%w%-_%.]+)%s+([%w%-_%.]+)$")
+      if branch and module then
+        EMERGE:loadModule(module, branch)
+      else
+        EMERGE:loadModule(args)
+      end
     end
   ]])
   self.aliases.unload = tempAlias("^emodule unload ([^ ]+)$", [[EMERGE:unloadModule(matches[2])]])
@@ -1680,6 +1696,7 @@ function ModuleManager:showHelp()
 <LightSteelBlue>Core Commands:<reset>
   <SteelBlue>emodule list<reset>             List all modules (loaded & available)
   <SteelBlue>emodule load <id><reset>        Download and load a module
+  <SteelBlue>emodule load <branch> <id><reset>  Load module from specific branch
   <SteelBlue>emodule load required<reset>    Load all required modules
   <SteelBlue>emodule unload <id><reset>      Unload a loaded module
   <SteelBlue>emodule enable <id><reset>      Enable a module for auto-loading
@@ -1715,6 +1732,10 @@ function ModuleManager:showHelp()
   emodule refresh                    # Update module list from all repos
   emodule search combat              # Find combat-related modules
   emodule info emerge-core           # Get detailed info about a module
+  
+  <DimGrey>Load from branch:<reset>
+  emodule load testbranch emerge-test-module   # Load from 'testbranch'
+  emodule load dev emerge-core                 # Load from 'dev' branch
   
   <DimGrey>Add from GitHub:<reset>
   emodule github rjm11/mudlet-combat-module

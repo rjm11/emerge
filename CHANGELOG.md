@@ -5,6 +5,22 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.3.0] - 2025-08-07
+
+### Added
+- Branch support for module loading: `emodule load <branch> <module>`
+- Ability to load modules from experimental or development branches
+- Branch indicator shown when loading from non-default branch
+
+### Changed
+- Updated help text to include branch loading syntax
+- Added examples for branch-based module loading
+
+### Use Cases
+- Test experimental fixes: `emodule load testbranch emerge-test-module`
+- Load development versions: `emodule load dev emerge-core`
+- Try bug fixes before merging: `emodule load bugfix-123 module-name`
+
 ## [1.2.2] - 2025-08-07
 
 ### Fixed
