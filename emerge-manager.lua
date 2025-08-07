@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.8
+-- Version: 1.1.9
 
-local CURRENT_VERSION = "1.1.8"
+local CURRENT_VERSION = "1.1.9"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -401,6 +401,49 @@ function ModuleManager:toggleModule(module_id, enabled)
   -- If disabling and currently loaded, unload it
   if not enabled and self.modules[module_id] then
     self:unloadModule(module_id)
+  end
+end
+
+-- Load all required modules
+function ModuleManager:loadRequiredModules()
+  cecho("<DarkOrange>[EMERGE] Loading all required modules...<reset>\n")
+  
+  local all_modules = self:getModuleList()
+  local required_modules = {}
+  
+  -- Find all required modules
+  for id, info in pairs(all_modules) do
+    -- Skip if already loaded or is the manager itself
+    if not self.modules[id] and id ~= "emerge-manager" then
+      local is_required = false
+      if info.type == "required" or info.type == "core" or info.category == "required" then
+        is_required = true
+      elseif id:match("^emerge%-core") or id:match("^core%-") then
+        is_required = true
+      end
+      
+      if is_required then
+        table.insert(required_modules, {id = id, info = info, order = info.load_order or 50})
+      end
+    end
+  end
+  
+  -- Sort by load order
+  table.sort(required_modules, function(a, b) return a.order < b.order end)
+  
+  if #required_modules == 0 then
+    cecho("<LightSteelBlue>[EMERGE] All required modules are already loaded<reset>\n")
+    return
+  end
+  
+  cecho(string.format("<LightSteelBlue>[EMERGE] Found %d required modules to load<reset>\n", #required_modules))
+  
+  -- Load each module with a small delay
+  for i, module in ipairs(required_modules) do
+    tempTimer(i * 0.5, function()
+      cecho(string.format("<DimGrey>[%d/%d] Loading %s...<reset>\n", i, #required_modules, module.id))
+      self:loadModule(module.id)
+    end)
   end
 end
 
@@ -1325,8 +1368,11 @@ function ModuleManager:setGitHubToken(token)
   cecho("<LightSteelBlue>[EMERGE] GitHub token saved<reset>\n")
   cecho("<DimGrey>Verifying access to repositories...<reset>\n")
   
-  -- Force refresh to verify token works
+  -- Force refresh to verify token works (silent)
+  local old_debug = self.config.debug
+  self.config.debug = false  -- Temporarily disable debug output
   self:refreshCache(true)
+  self.config.debug = old_debug  -- Restore debug setting
   
   -- After discovery completes, check if we found any private modules
   tempTimer(2, function()
@@ -1360,7 +1406,13 @@ function ModuleManager:createAliases()
   
   -- Module management commands
   self.aliases.list = tempAlias("^emodule list$", [[EMERGE:listModules()]])
-  self.aliases.load = tempAlias("^emodule load (.+)$", [[EMERGE:loadModule(matches[2])]])
+  self.aliases.load = tempAlias("^emodule load (.+)$", [[
+    if matches[2] == "required" then
+      EMERGE:loadRequiredModules()
+    else
+      EMERGE:loadModule(matches[2])
+    end
+  ]])
   self.aliases.unload = tempAlias("^emodule unload ([^ ]+)$", [[EMERGE:unloadModule(matches[2])]])
   self.aliases.unload_confirm = tempAlias("^emodule unload ([^ ]+) (.+)$", [[EMERGE:unloadModule(matches[2], matches[3])]])
   self.aliases.github = tempAlias("^emodule github (.+)$", [[
@@ -1419,16 +1471,23 @@ end
 
 -- List modules command
 function ModuleManager:listModules()
-  -- Refresh cache if needed
-  self:refreshCache(false)
+  -- Refresh cache if needed (silently)
+  local cache_age = os.time() - self.discovery_cache.last_refresh
+  if cache_age > self.discovery_cache.cache_duration then
+    local old_debug = self.config.debug
+    self.config.debug = false
+    self:refreshCache(false)
+    self.config.debug = old_debug
+  end
   
-  cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
-  cecho("<LightSteelBlue>EMERGE Module System<reset>\n")
-  cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
+  cecho("\n<SlateGray>═══════════════════════════════════════════════════<reset>\n")
+  cecho("<LightSteelBlue>             EMERGE Module System<reset>\n")
+  cecho("<SlateGray>═══════════════════════════════════════════════════<reset>\n\n")
   
   -- Show currently loaded modules
-  cecho("<LightSteelBlue>Currently Loaded:<reset>\n")
-  cecho(string.format("  <SteelBlue>• emerge-manager<reset> v%s <DimGrey>(core system)<reset>\n", self.version))
+  cecho("<LightSteelBlue>● Currently Loaded Modules<reset>\n")
+  cecho("<SlateGray>──────────────────────────────────────<reset>\n")
+  cecho(string.format("  <SteelBlue>emerge-manager<reset> v%s <DimGrey>(core system)<reset>\n", self.version))
   
   if next(self.modules) then
     for id, module in pairs(self.modules) do
@@ -1440,52 +1499,83 @@ function ModuleManager:listModules()
           update_status = " <yellow>(update available)<reset>"
         end
       end
-      cecho(string.format("  <SteelBlue>• %s<reset> v%s - %s%s\n", 
+      cecho(string.format("  <SteelBlue>%s<reset> v%s - %s%s\n", 
         id, module.version or "?", module.name or "Unknown", update_status))
     end
+  else
+    cecho("  <DimGrey>No additional modules loaded<reset>\n")
   end
   
-  -- Show available modules from all sources
+  -- Separate required and optional modules
   local all_modules = self:getModuleList()
-  local available_count = 0
-  local available_modules = {}
+  local required_modules = {}
+  local optional_modules = {}
   
   for id, info in pairs(all_modules) do
-    if not self.modules[id] then
-      available_count = available_count + 1
-      table.insert(available_modules, {id = id, info = info})
+    -- Skip if module is already loaded (including the manager itself)
+    if not self.modules[id] and id ~= "emerge-manager" then
+      -- Check if module is required or optional
+      local is_required = false
+      if info.type == "required" or info.type == "core" or info.category == "required" then
+        is_required = true
+      elseif id:match("^emerge%-core") or id:match("^core%-") then
+        is_required = true
+      end
+      
+      if is_required then
+        table.insert(required_modules, {id = id, info = info})
+      else
+        table.insert(optional_modules, {id = id, info = info})
+      end
     end
   end
   
-  -- Sort available modules by repository
-  table.sort(available_modules, function(a, b)
-    local repo_a = a.info.repository or "custom"
-    local repo_b = b.info.repository or "custom"
-    if repo_a ~= repo_b then
-      return repo_a < repo_b
-    end
-    return a.id < b.id
-  end)
+  -- Sort modules by name
+  table.sort(required_modules, function(a, b) return a.id < b.id end)
+  table.sort(optional_modules, function(a, b) return a.id < b.id end)
   
-  if available_count > 0 then
-    cecho("\n<LightSteelBlue>Available to Load:<reset>\n")
-    local current_repo = nil
-    for _, entry in ipairs(available_modules) do
+  -- Show required modules
+  if #required_modules > 0 then
+    cecho("\n<LightSteelBlue>● Required Modules<reset> <DimGrey>(essential for combat system)<reset>\n")
+    cecho("<SlateGray>──────────────────────────────────────<reset>\n")
+    
+    for _, entry in ipairs(required_modules) do
       local id = entry.id
       local info = entry.info
       
-      -- Group by repository
+      local version_info = ""
+      if info.version then
+        version_info = " v" .. info.version
+      end
+      
+      local repo_info = ""
+      if info.repository then
+        repo_info = string.format(" <DimGrey>(%s)<reset>", info.repository)
+      end
+      
+      cecho(string.format("  <green>◆<reset> <SteelBlue>%s<reset>%s - %s%s\n", 
+        id, version_info, info.name or info.description or "Unknown", repo_info))
+    end
+    
+    cecho("\n  <LightBlue>→ Quick load all: <SteelBlue>emodule load required<reset>\n")
+  end
+  
+  -- Show optional modules
+  if #optional_modules > 0 then
+    cecho("\n<LightSteelBlue>● Optional Modules<reset> <DimGrey>(additional features)<reset>\n")
+    cecho("<SlateGray>──────────────────────────────────────<reset>\n")
+    
+    local current_repo = nil
+    for _, entry in ipairs(optional_modules) do
+      local id = entry.id
+      local info = entry.info
+      
+      -- Group by repository for optional modules
       local repo_name = info.repository or "custom"
       if repo_name ~= current_repo then
         if current_repo then cecho("\n") end
-        cecho(string.format("  <DimGrey>%s:<reset>\n", repo_name))
+        cecho(string.format("    <DimGrey>%s:<reset>\n", repo_name))
         current_repo = repo_name
-      end
-      
-      local source = ""
-      if info.github then
-        source = string.format("<DimGrey>(%s/%s)<reset>", 
-          info.github.owner, info.github.repo)
       end
       
       local version_info = ""
@@ -1493,22 +1583,26 @@ function ModuleManager:listModules()
         version_info = " v" .. info.version
       end
       
-      cecho(string.format("    <SteelBlue>• %s<reset>%s - %s %s\n", 
-        id, version_info, info.name or info.description or "Unknown", source))
+      cecho(string.format("      <yellow>◇<reset> <SteelBlue>%s<reset>%s - %s\n", 
+        id, version_info, info.name or info.description or "Unknown"))
     end
-  else
+  end
+  
+  if #required_modules == 0 and #optional_modules == 0 then
     cecho("\n<DimGrey>No additional modules available<reset>\n")
     cecho("<DimGrey>Try 'emodule refresh' to update module list<reset>\n")
   end
   
+  -- Show helpful footer
+  cecho("\n<SlateGray>═══════════════════════════════════════════════════<reset>\n")
+  cecho("<DimGrey>Commands: <SteelBlue>emodule load <module><reset> | <SteelBlue>emodule help<reset> | <SteelBlue>emodule update<reset>\n")
+  
   -- Show cache status
   local cache_age = os.time() - self.discovery_cache.last_refresh
   if self.discovery_cache.last_refresh > 0 then
-    cecho(string.format("\n<DimGrey>Cache last updated: %d minutes ago<reset>\n", 
+    cecho(string.format("<DimGrey>Module list updated: %d minutes ago<reset>\n", 
       math.floor(cache_age / 60)))
   end
-  
-  cecho("\n<DimGrey>Type 'emodule help' for all commands<reset>\n")
 end
 
 -- Show configuration
@@ -1586,6 +1680,7 @@ function ModuleManager:showHelp()
 <LightSteelBlue>Core Commands:<reset>
   <SteelBlue>emodule list<reset>             List all modules (loaded & available)
   <SteelBlue>emodule load <id><reset>        Download and load a module
+  <SteelBlue>emodule load required<reset>    Load all required modules
   <SteelBlue>emodule unload <id><reset>      Unload a loaded module
   <SteelBlue>emodule enable <id><reset>      Enable a module for auto-loading
   <SteelBlue>emodule disable <id><reset>     Disable a module
@@ -1771,15 +1866,16 @@ function ModuleManager:init()
     end
   end)
   
-  -- Schedule update check
-  if self.config.auto_update then
-    tempTimer(40, function()
-      if EMERGE and EMERGE.loaded then
-        EMERGE.silent_check = true
-        EMERGE:checkAllUpdates()
-      end
-    end)
-  end
+  -- Schedule update check (DISABLED - only manual updates)
+  -- Automatic updates disabled - use 'emodule update' for manual checking
+  -- if self.config.auto_update then
+  --   tempTimer(40, function()
+  --     if EMERGE and EMERGE.loaded then
+  --       EMERGE.silent_check = true
+  --       EMERGE:checkAllUpdates()
+  --     end
+  --   end)
+  -- end
   
   self.loaded = true
 end

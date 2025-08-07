@@ -5,6 +5,30 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.9] - 2025-08-07
+
+### Added
+- New command: `emodule load required` - Loads all required modules automatically
+- Split module list into Required and Optional sections for clarity
+- Better visual hierarchy in module listing with section headers
+
+### Changed  
+- Disabled automatic update checking on startup (was running after 40 seconds)
+- Made token verification refresh silent (no more verbose output)
+- Completely redesigned `emodule list` output for better readability
+- Required modules now marked with green diamonds (♦)
+- Optional modules marked with yellow diamonds (♢)
+- Added helpful prompts for loading required modules
+
+### Fixed
+- Removed unexpected "Checking all modules for updates" messages
+- Update checking now only happens when explicitly requested
+
+### Improved
+- Module list layout with clear sections and better spacing
+- Visual separation between module categories
+- Grouped optional modules by repository source
+
 ## [1.1.8] - 2025-08-07
 
 ### Changed
