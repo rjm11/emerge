@@ -5,7 +5,7 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.1.4] - 2025-01-07
+## [1.1.4] - 2025-08-07
 
 ### Added  
 - Token command now automatically verifies repository access
@@ -20,14 +20,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - Private repository access verification after token setup
 
-## [1.1.3] - 2025-01-07
+## [1.1.3] - 2025-08-07
 
 ### Changed
 - Reverted to cleaner, simpler quick installer in README
 - Removed unnecessary post-install instructions from installer
 - Simplified installer output for better user experience
 
-## [1.1.2] - 2025-01-07
+## [1.1.2] - 2025-08-07
 
 ### Added
 - Force upgrade command (`emodule upgrade force`) to bypass version checking
@@ -36,7 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 - Updated help text to include force upgrade option
 
-## [1.1.1] - 2025-01-07
+## [1.1.1] - 2025-08-07
 
 ### Fixed
 - Repository naming (changed from "emerge-public" to "emerge")
@@ -49,7 +49,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Enabled emerge-private repository by default (with token check)
 - Improved debug output for repository discovery
 
-## [1.1.0] - 2025-01-07
+## [1.1.0] - 2025-08-07
 
 ### Added
 - Full GitHub repository discovery system
@@ -74,7 +74,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Version mismatch between manager and manifest
 - Quick installer path reference
 
-## [0.5.7] - 2025-01-06
+## [0.5.7] - 2025-08-06
 
 ### Added
 - Initial module management system
