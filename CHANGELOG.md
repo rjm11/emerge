@@ -5,6 +5,23 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.7] - 2025-08-07
+
+### Fixed
+- **CRITICAL**: Replaced downloadFile with getHTTP for GitHub API calls
+- Private repository access now works correctly with authentication
+- Both classic (ghp_*) and fine-grained (github_pat_*) tokens now function
+
+### Changed
+- Complete rewrite of downloadManifest to use getHTTP instead of downloadFile
+- Improved error handling with proper event-driven callbacks
+- Better debug output for troubleshooting connection issues
+
+### Technical
+- Uses sysGetHttpDone and sysGetHttpError events (Mudlet 4.10+)
+- Properly handles Authorization headers for private repos
+- Verified working with Mudlet 4.19.1
+
 ## [1.1.6] - 2025-08-07
 
 ### Changed

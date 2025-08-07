@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.6
+-- Version: 1.1.7
 
-local CURRENT_VERSION = "1.1.6"
+local CURRENT_VERSION = "1.1.7"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -868,19 +868,17 @@ function ModuleManager:discoverRepositories()
   end
 end
 
--- Download manifest from a repository
+-- Download manifest from a repository using getHTTP
 function ModuleManager:downloadManifest(repo_config, callback)
   local manifest_url = string.format("https://raw.githubusercontent.com/%s/%s/%s/manifest.json",
     repo_config.owner, repo_config.repo, repo_config.branch)
-  
-  local cache_file = self.paths.cache .. "manifest-" .. repo_config.name .. ".json"
   
   -- Debug output
   if self.config.debug then
     cecho(string.format("<DimGrey>[DEBUG] Fetching: %s<reset>\n", manifest_url))
   end
   
-  -- Headers for private repos - try token format for classic tokens
+  -- Headers for private repos
   local headers = {}
   if not repo_config.public and self.config.github_token then
     -- Use different format based on token type
@@ -896,60 +894,63 @@ function ModuleManager:downloadManifest(repo_config, callback)
     end
   end
   
-  downloadFile(cache_file, manifest_url, headers)
+  -- Register handlers for this specific request
+  local success_handler, error_handler, timeout_handler
+  local handler_id = "manifest_" .. repo_config.name .. "_" .. os.time()
   
-  -- Set up completion handler
-  local download_handler = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
-    if filename == cache_file then
-      killAnonymousEventHandler(download_handler)
+  -- Success handler
+  success_handler = registerAnonymousEventHandler("sysGetHttpDone", function(_, responseUrl, responseBody)
+    if responseUrl == manifest_url then
+      -- Clean up handlers
+      killAnonymousEventHandler(success_handler)
+      if error_handler then killAnonymousEventHandler(error_handler) end
+      if timeout_handler then killTimer(timeout_handler) end
       
-      local file = io.open(filename, "r")
-      if file then
-        local content = file:read("*all")
-        file:close()
-        
-        local ok, manifest = pcall(yajl.to_value, content)
-        if ok and manifest and manifest.modules then
-          -- Cache the manifest
-          self.discovery_cache.manifests[repo_config.name] = manifest
-          callback(true, manifest.modules)
-        else
-          callback(false, nil)
-        end
+      -- Parse the response
+      local ok, manifest = pcall(yajl.to_value, responseBody)
+      if ok and manifest and manifest.modules then
+        -- Cache the manifest
+        self.discovery_cache.manifests[repo_config.name] = manifest
+        callback(true, manifest.modules)
       else
+        -- Check if we got a 404 or other error page
+        if responseBody:match("404") or responseBody:match("Not Found") then
+          if self.config.debug then
+            cecho(string.format("<yellow>[DEBUG] %s returned 404<reset>\n", repo_config.name))
+          end
+        end
         callback(false, nil)
       end
-      
-      os.remove(filename)
     end
   end)
   
-  -- Set up error handler with timeout
-  local error_handler = registerAnonymousEventHandler("sysDownloadError", function(_, file_err)
-    if file_err == cache_file then
-      killAnonymousEventHandler(download_handler)
+  -- Error handler
+  error_handler = registerAnonymousEventHandler("sysGetHttpError", function(_, responseUrl, errorMsg)
+    if responseUrl == manifest_url then
       killAnonymousEventHandler(error_handler)
+      if success_handler then killAnonymousEventHandler(success_handler) end
+      if timeout_handler then killTimer(timeout_handler) end
+      
+      if self.config.debug then
+        cecho(string.format("<red>[DEBUG] Error fetching %s: %s<reset>\n", 
+          repo_config.name, errorMsg or "unknown"))
+      end
       callback(false, nil)
     end
   end)
   
-  -- Add timeout protection
-  tempTimer(5, function()
-    if download_handler then
-      killAnonymousEventHandler(download_handler)
-    end
-    if error_handler then
-      killAnonymousEventHandler(error_handler)
+  -- Timeout protection
+  timeout_handler = tempTimer(5, function()
+    if success_handler then killAnonymousEventHandler(success_handler) end
+    if error_handler then killAnonymousEventHandler(error_handler) end
+    if self.config.debug then
+      cecho(string.format("<yellow>[DEBUG] Timeout fetching %s<reset>\n", repo_config.name))
     end
     callback(false, nil)
   end)
-  local error_handler = registerAnonymousEventHandler("sysDownloadError", function(_, filename)
-    if filename == cache_file then
-      killAnonymousEventHandler(download_handler)
-      killAnonymousEventHandler(error_handler)
-      callback(false, nil)
-    end
-  end)
+  
+  -- Make the HTTP request using getHTTP
+  getHTTP(manifest_url, headers)
 end
 
 -- Get cached modules
