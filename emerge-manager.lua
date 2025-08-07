@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.7
+-- Version: 1.1.8
 
-local CURRENT_VERSION = "1.1.7"
+local CURRENT_VERSION = "1.1.8"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1303,11 +1303,15 @@ function ModuleManager:setGitHubToken(token)
     cecho("  1. Go to ")
     cechoLink("https://github.com/settings/personal-access-tokens", [[openUrl("https://github.com/settings/personal-access-tokens")]], "Click to open in browser")
     echo("\n")
-    cecho("  2. Click 'Generate new token (classic)'\n")
+    cecho("  2. Click 'Fine-grained personal access tokens'\n")
     cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
-    cecho("  4. Select the 'repo' scope checkbox\n")
-    cecho("  5. Click 'Generate token' at the bottom\n")
-    cecho("  6. Copy the token that starts with 'ghp_'\n\n")
+    cecho("  4. Set expiration (90 days recommended)\n")
+    cecho("  5. Select specific repositories:\n")
+    cecho("     • rjm11/emerge\n")
+    cecho("     • rjm11/emerge-private\n")
+    cecho("  6. Permissions: Contents (Read)\n")
+    cecho("  7. Click 'Generate token' at the bottom\n")
+    cecho("  8. Copy the token that starts with 'github_pat_'\n\n")
     cecho("<SteelBlue>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
     return
   end
@@ -1526,18 +1530,21 @@ function ModuleManager:showGitHubHelp()
   cechoLink("github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open")
   cecho([[
 
-  2. Click <SteelBlue>"Generate new token"<reset> → <SteelBlue>"Generate new token (classic)"<reset>
+  2. Click <SteelBlue>"Generate new token"<reset> → <SteelBlue>"Fine-grained personal access tokens"<reset>
   3. Give it a name like <DimGrey>"Mudlet EMERGE Access"<reset>
   4. Set expiration (recommended: <SteelBlue>90 days<reset>)
-  5. Select scopes:
-     ✓ <SteelBlue>repo<reset> - Full control of private repositories
-  6. Click <SteelBlue>"Generate token"<reset> at the bottom
-  7. <yellow>IMPORTANT: Copy the token NOW - you won't see it again!<reset>
-     Token looks like: <DimGrey>ghp_xxxxxxxxxxxxxxxxxxxx<reset>
+  5. Repository access: <SteelBlue>Selected repositories<reset>
+     - Add: rjm11/emerge
+     - Add: rjm11/emerge-private
+  6. Repository permissions:
+     ✓ <SteelBlue>Contents<reset>: Read
+  7. Click <SteelBlue>"Generate token"<reset> at the bottom
+  8. <yellow>IMPORTANT: Copy the token NOW - you won't see it again!<reset>
+     Token looks like: <DimGrey>github_pat_xxxxxxxxxxxxxxxxxxxx<reset>
 
 <LightSteelBlue>Step 2: Add Token to EMERGE<reset>
   Run: <SteelBlue>emodule token <your_token_here><reset>
-  Example: <DimGrey>emodule token ghp_1234567890abcdef<reset>
+  Example: <DimGrey>emodule token github_pat_1234567890abcdef<reset>
 
 <LightSteelBlue>Step 3: Add Modules<reset>
   Public repos:  <SteelBlue>emodule github owner/repository<reset>

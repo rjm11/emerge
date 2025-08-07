@@ -5,6 +5,19 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.8] - 2025-08-07
+
+### Changed
+- Now recommends fine-grained personal access tokens for better security
+- Updated all token instructions to prefer github_pat_ tokens
+- Fine-grained tokens allow limiting access to specific repositories only
+- More secure: only grants read access to Contents, not full repo control
+
+### Security
+- Fine-grained tokens are now the recommended approach
+- Instructions guide users to select only necessary repositories
+- Minimal permissions (Contents: Read) for enhanced security
+
 ## [1.1.7] - 2025-08-07
 
 ### Fixed
