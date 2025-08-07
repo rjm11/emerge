@@ -5,6 +5,29 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.9] - 2025-08-07
+
+### Fixed
+- **CRITICAL**: Added `EMERGE:register()` compatibility alias for emerge-core integration
+- Fixed module loading failure where emerge-core couldn't register due to API mismatch
+- emerge-core now loads successfully and provides global `emerge.events` APIs
+
+### Added  
+- **Dependency Resolution**: Manager now automatically loads module dependencies
+- Recursive dependency loading with proper error handling
+- Debug output for dependency loading process
+- Dependency validation and failure reporting
+
+### Improved
+- Module loading now follows proper dependency chain (emerge-core loads before emerge-test-module)
+- Better error messages when dependencies fail to load
+- Automatic dependency discovery from module manifests
+
+### Impact
+- `etest help` command should now work (emerge-test-module can access emerge.events APIs)
+- All EMERGE modules can now depend on emerge-core and load properly
+- Foundation for event-driven architecture is now functional
+
 ## [0.5.8] - 2025-08-07
 
 ### Added

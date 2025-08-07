@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.8
+-- Version: 0.5.9
 
-local CURRENT_VERSION = "0.5.8"
+local CURRENT_VERSION = "0.5.9"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -244,6 +244,11 @@ function ModuleManager:registerModule(module_id, module_obj)
   end
   
   return true
+end
+
+-- Compatibility alias for emerge-core and other legacy modules
+function ModuleManager:register(module_id, module_obj)
+  return self:registerModule(module_id, module_obj)
 end
 
 -- Unregister a module
@@ -498,6 +503,31 @@ function ModuleManager:loadModule(module_id, custom_branch)
     cecho("<DimGrey>Try 'emodule list' to see available modules<reset>\n")
     cecho("<DimGrey>Or 'emodule refresh' to update module list<reset>\n")
     return
+  end
+  
+  -- Check and load dependencies first
+  if module_info.dependencies and type(module_info.dependencies) == "table" then
+    for _, dependency in ipairs(module_info.dependencies) do
+      -- Check if dependency is already loaded
+      if not self.modules[dependency] then
+        cecho(string.format("<DarkOrange>[EMERGE] Loading dependency: %s<reset>\n", dependency))
+        -- Recursively load the dependency
+        self:loadModule(dependency, custom_branch)
+        
+        -- Wait a moment for dependency to load before continuing
+        tempTimer(0.5, function()
+          if not self.modules[dependency] then
+            cecho(string.format("<IndianRed>[EMERGE] Failed to load dependency: %s<reset>\n", dependency))
+            cecho(string.format("<IndianRed>[EMERGE] Cannot load %s without its dependency<reset>\n", module_id))
+            return
+          end
+        end)
+      else
+        if self.config.debug then
+          cecho(string.format("<DimGrey>[DEBUG] Dependency already loaded: %s<reset>\n", dependency))
+        end
+      end
+    end
   end
   
   if not module_info.github then
