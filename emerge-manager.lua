@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.4
+-- Version: 0.5.5
 
-local CURRENT_VERSION = "0.5.4"
+local CURRENT_VERSION = "0.5.5"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1916,36 +1916,13 @@ function ModuleManager:showHelp()
   
 <LightSteelBlue>Update Commands:<reset>
   <SteelBlue>emodule update<reset>           Check all components for updates
-  <SteelBlue>emodule upgrade <component><reset>  Upgrade manager, module, or all
-  <SteelBlue>emodule upgrade all<reset>      Upgrade everything that has updates
-  <SteelBlue>emodule upgrade manager<reset>  Upgrade just the manager
-  <SteelBlue>emodule upgrade <module><reset> Upgrade a specific module
+  <SteelBlue>emodule upgrade <target><reset> Upgrade manager/module/all
   
 <LightSteelBlue>Other Commands:<reset>
   <SteelBlue>emodule config<reset>           Show current configuration
   <SteelBlue>emodule help<reset>             Show this help (or just 'emodule')
 
-<LightSteelBlue>Examples:<reset>
-  <DimGrey>Discovery & Search:<reset>
-  emodule refresh                    # Update module list from all repos
-  emodule search combat              # Find combat-related modules
-  emodule info emerge-core           # Get detailed info about a module
-  
-  <DimGrey>Load from branch:<reset>
-  emodule load testbranch emerge-test-module   # Load from 'testbranch'
-  emodule load dev emerge-core                 # Load from 'dev' branch
-  
-  <DimGrey>Add from GitHub:<reset>
-  emodule github rjm11/mudlet-combat-module
-  emodule github https://github.com/user/repo
-  
-  <DimGrey>Manual add:<reset>
-  emodule add mymod {"name":"My Module","github":{"owner":"me","repo":"my-mod","file":"mod.lua"}}
-  
-  <DimGrey>Private repos:<reset>
-  emodule token ghp_your_github_personal_access_token
-
-<DimGrey>Configuration saved to: ]] .. self.paths.config .. [[<reset>
+<DimGrey>Configuration: ]] .. self.paths.config .. [[<reset>
 ]])
 end
 
