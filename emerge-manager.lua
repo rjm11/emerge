@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.7
+-- Version: 1.1.0
 
-local CURRENT_VERSION = "0.5.7"
+local CURRENT_VERSION = "1.1.0"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -84,22 +84,24 @@ ModuleManager.repositories = {
     public = true,
     description = "Public manager and core modules"
   },
-  {
-    name = "emerge-private",
-    owner = "rjm11",
-    repo = "emerge-private",
-    branch = "main",
-    public = false,
-    description = "Private combat modules"
-  },
-  {
-    name = "emerge-dev",
-    owner = "rjm11",
-    repo = "emerge-dev",
-    branch = "main",
-    public = false,
-    description = "Development modules"
-  }
+  -- Private repos temporarily disabled for testing
+  -- Uncomment when ready:
+  -- {
+  --   name = "emerge-private",
+  --   owner = "rjm11",
+  --   repo = "emerge-private",
+  --   branch = "main",
+  --   public = false,
+  --   description = "Private combat modules"
+  -- },
+  -- {
+  --   name = "emerge-dev",
+  --   owner = "rjm11",
+  --   repo = "emerge-dev",
+  --   branch = "main",
+  --   public = false,
+  --   description = "Development modules"
+  -- }
 }
 
 -- GitHub configuration for self-updates (backward compatibility)
@@ -823,10 +825,19 @@ function ModuleManager:discoverRepositories()
     end)
   end
   
-  -- Handle timeout
-  tempTimer(15, function()
+  -- Handle timeout and force completion
+  tempTimer(10, function()
     if completed_downloads < pending_downloads then
       cecho("<yellow>[EMERGE] Some repositories timed out<reset>\n")
+      -- Force completion with discovered modules so far
+      self.discovery_cache.modules = discovered_modules
+      self.discovery_cache.last_refresh = os.time()
+      
+      local total_modules = table.size(discovered_modules)
+      if total_modules > 0 then
+        cecho(string.format("<LightSteelBlue>[EMERGE] Discovery partial: %d modules available<reset>\n", 
+          total_modules))
+      end
     end
   end)
 end
@@ -838,10 +849,15 @@ function ModuleManager:downloadManifest(repo_config, callback)
   
   local cache_file = self.paths.cache .. "manifest-" .. repo_config.name .. ".json"
   
-  -- Headers for private repos
+  -- Debug output
+  if self.config.debug then
+    cecho(string.format("<DimGrey>[DEBUG] Fetching: %s<reset>\n", manifest_url))
+  end
+  
+  -- Headers for private repos - Mudlet uses Bearer format
   local headers = {}
   if not repo_config.public and self.config.github_token then
-    headers["Authorization"] = "token " .. self.config.github_token
+    headers["Authorization"] = "Bearer " .. self.config.github_token
   end
   
   downloadFile(cache_file, manifest_url, headers)
@@ -872,7 +888,25 @@ function ModuleManager:downloadManifest(repo_config, callback)
     end
   end)
   
-  -- Set up error handler
+  -- Set up error handler with timeout
+  local error_handler = registerAnonymousEventHandler("sysDownloadError", function(_, file_err)
+    if file_err == cache_file then
+      killAnonymousEventHandler(download_handler)
+      killAnonymousEventHandler(error_handler)
+      callback(false, nil)
+    end
+  end)
+  
+  -- Add timeout protection
+  tempTimer(5, function()
+    if download_handler then
+      killAnonymousEventHandler(download_handler)
+    end
+    if error_handler then
+      killAnonymousEventHandler(error_handler)
+    end
+    callback(false, nil)
+  end)
   local error_handler = registerAnonymousEventHandler("sysDownloadError", function(_, filename)
     if filename == cache_file then
       killAnonymousEventHandler(download_handler)
@@ -1302,6 +1336,18 @@ function ModuleManager:createAliases()
   self.aliases.repos = tempAlias("^emodule repos$", [[EMERGE:listRepositories()]])
   self.aliases.search = tempAlias("^emodule search (.+)$", [[EMERGE:searchModules(matches[2])]])
   self.aliases.info = tempAlias("^emodule info (.+)$", [[EMERGE:showModuleInfo(matches[2])]])
+  self.aliases.debug = tempAlias("^emodule debug$", [[EMERGE:toggleDebug()]])
+end
+
+-- Toggle debug mode
+function ModuleManager:toggleDebug()
+  self.config.debug = not self.config.debug
+  self:saveConfig()
+  if self.config.debug then
+    cecho("<LightSteelBlue>[EMERGE] Debug mode enabled<reset>\n")
+  else
+    cecho("<LightSteelBlue>[EMERGE] Debug mode disabled<reset>\n")
+  end
 end
 
 -- List modules command
