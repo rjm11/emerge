@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.2.1
+-- Version: 1.2.2
 
-local CURRENT_VERSION = "1.2.1"
+local CURRENT_VERSION = "1.2.2"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1567,27 +1567,24 @@ function ModuleManager:listModules()
     cecho("\n<LightSteelBlue>● Optional Modules<reset> <DimGrey>(additional features)<reset>\n")
     cecho("<SlateGray>──────────────────────────────────────<reset>\n")
     
-    local current_repo = nil
     for _, entry in ipairs(optional_modules) do
       local id = entry.id
       local info = entry.info
-      
-      -- Group by repository for optional modules
-      local repo_name = info.repository or "custom"
-      if repo_name ~= current_repo then
-        if current_repo then cecho("\n") end
-        cecho(string.format("    <DimGrey>%s:<reset>\n", repo_name))
-        current_repo = repo_name
-      end
       
       local version_info = ""
       if info.version then
         version_info = " v" .. info.version
       end
       
+      local repo_info = ""
+      if info.repository then
+        repo_info = string.format(" <DimGrey>(%s)<reset>", info.repository)
+      end
+      
       local desc = info.name or info.description or "No description"
-      cecho(string.format("      <yellow>◇<reset> <SteelBlue>%s<reset>%s - %s\n", 
-        id, version_info, desc))
+      
+      cecho(string.format("  <yellow>◇<reset> <SteelBlue>%s<reset>%s - %s%s\n", 
+        id, version_info, desc, repo_info))
     end
   end
   
