@@ -5,6 +5,28 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2025-08-07
+
+### Fixed
+- `emodule update` now properly checks BOTH manager and modules for updates
+- Fixed issue where manager updates weren't shown in `emodule update`
+
+### Added
+- New comprehensive upgrade system with `emodule upgrade <component>`
+- `emodule upgrade all` - Upgrades everything that has updates
+- `emodule upgrade manager` - Upgrades just the manager
+- `emodule upgrade <module>` - Upgrades a specific module
+- Better progress tracking and feedback during upgrades
+
+### Changed
+- `emodule update` now checks manager + all modules (no longer silent about manager)
+- Improved help text to reflect new upgrade commands
+- Better error messages and usage instructions
+
+### Commands Summary
+- `emodule update` → Check everything for updates
+- `emodule upgrade <what>` → Actually upgrade something
+
 ## [0.5.1] - 2025-08-07
 
 ### Fixed

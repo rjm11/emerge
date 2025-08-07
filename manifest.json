@@ -4,7 +4,7 @@
   "description": "EMERGE Public Repository - Core Manager",
   "modules": {
     "emerge-manager": {
-      "version": "0.5.1",
+      "version": "0.5.2",
       "path": "emerge-manager.lua",
       "type": "required",
       "description": "EMERGE module manager with GitHub discovery",

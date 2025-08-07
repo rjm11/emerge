@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.1
+-- Version: 0.5.2
 
-local CURRENT_VERSION = "0.5.1"
+local CURRENT_VERSION = "0.5.2"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -607,28 +607,59 @@ end
 
 -- Check all modules for updates
 function ModuleManager:checkAllUpdates()
-  cecho("<DarkOrange>[EMERGE] Checking all modules for updates...<reset>\n")
+  cecho("<DarkOrange>[EMERGE] Checking manager and all modules for updates...<reset>\n")
   
-  -- Refresh cache to get latest versions
+  -- Check manager first
+  cecho("<DimGrey>[EMERGE] Checking manager version...<reset>\n")
+  local manager_update_available = false
+  
+  -- Store original silent mode
+  local was_silent = self.silent_check
+  self.silent_check = true
+  
+  -- Check manager updates
+  tempTimer(0.5, function()
+    self:checkSelfUpdate()
+  end)
+  
+  -- Refresh module cache to get latest versions  
   self:refreshCache(false)
   
-  -- Check self first
-  self:checkSelfUpdate()
-  
   -- Check for module updates using discovery cache
-  tempTimer(2, function() -- Wait for cache refresh
+  tempTimer(3, function() -- Wait for cache refresh and manager check
+    cecho("<DimGrey>[EMERGE] Checking module versions...<reset>\n")
     local updates = self:checkForUpdates()
     
-    if #updates > 0 then
-      cecho(string.format("\n<yellow>[EMERGE] %d module update(s) available:<reset>\n", #updates))
+    local total_updates = #updates
+    if self.pending_update then
+      total_updates = total_updates + 1
+    end
+    
+    if total_updates > 0 then
+      cecho(string.format("\n<yellow>[EMERGE] %d update(s) available:<reset>\n", total_updates))
+      
+      -- Show manager update if available
+      if self.pending_update then
+        cecho(string.format("  <SteelBlue>emerge-manager<reset>: v%s → v%s\n",
+          self.version, self.pending_update.version))
+      end
+      
+      -- Show module updates
       for _, update in ipairs(updates) do
         cecho(string.format("  <SteelBlue>%s<reset>: v%s → v%s (%s)\n",
           update.id, update.current, update.available, update.repository))
       end
-      cecho("\n<DimGrey>Use 'emodule load <module>' to update individual modules<reset>\n")
+      
+      cecho("\n<DimGrey>Commands:<reset>\n")
+      cecho("<DimGrey>  emodule upgrade manager  # Update the manager<reset>\n")
+      cecho("<DimGrey>  emodule upgrade <module> # Update a specific module<reset>\n")
+      cecho("<DimGrey>  emodule upgrade all      # Update everything<reset>\n")
     else
-      cecho("<LightSteelBlue>[EMERGE] All modules are up to date<reset>\n")
+      cecho("<LightSteelBlue>[EMERGE] All components are up to date<reset>\n")
     end
+    
+    -- Restore silent mode
+    self.silent_check = was_silent
     
     -- Check each loaded module for custom update methods
     for id, module in pairs(self.modules) do
@@ -680,6 +711,89 @@ function ModuleManager:checkSelfUpdate()
       end
     end
   end, true) -- one-time handler
+end
+
+-- Upgrade modules or manager
+function ModuleManager:upgradeComponent(component, force)
+  if not component or component == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <manager|module|all><reset>\n")
+    return
+  end
+  
+  if component == "all" then
+    -- Upgrade everything
+    cecho("<DarkOrange>[EMERGE] Upgrading all components...<reset>\n")
+    
+    -- First upgrade manager if needed
+    if self.pending_update then
+      self:upgradeSelf(force)
+      tempTimer(2, function()
+        -- Then upgrade modules
+        self:upgradeAllModules()
+      end)
+    else
+      -- Just upgrade modules
+      self:upgradeAllModules()
+    end
+    
+  elseif component == "manager" then
+    self:upgradeSelf(force)
+    
+  else
+    -- Try to upgrade specific module
+    self:upgradeModule(component, force)
+  end
+end
+
+-- Upgrade all modules that have updates
+function ModuleManager:upgradeAllModules()
+  local updates = self:checkForUpdates()
+  
+  if #updates == 0 then
+    cecho("<LightSteelBlue>[EMERGE] No module updates available<reset>\n")
+    return
+  end
+  
+  cecho(string.format("<DarkOrange>[EMERGE] Upgrading %d module(s)...<reset>\n", #updates))
+  
+  for i, update in ipairs(updates) do
+    tempTimer(i * 1, function()
+      cecho(string.format("<DimGrey>[%d/%d] Upgrading %s...<reset>\n", i, #updates, update.id))
+      self:loadModule(update.id) -- loadModule will download the latest version
+    end)
+  end
+end
+
+-- Upgrade a specific module
+function ModuleManager:upgradeModule(module_id, force)
+  if not module_id or module_id == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <module><reset>\n")
+    return
+  end
+  
+  local all_modules = self:getModuleList()
+  local module_info = all_modules[module_id]
+  
+  if not module_info then
+    cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
+    return
+  end
+  
+  if not force then
+    -- Check if update is actually needed
+    local loaded_module = self.modules[module_id]
+    if loaded_module and loaded_module.version == module_info.version then
+      cecho(string.format("<LightSteelBlue>[EMERGE] %s is already up to date (v%s)<reset>\n", 
+        module_id, module_info.version))
+      return
+    end
+  end
+  
+  cecho(string.format("<DarkOrange>[EMERGE] Upgrading %s to v%s...<reset>\n", 
+    module_id, module_info.version))
+  
+  -- Use loadModule to get the latest version
+  self:loadModule(module_id)
 end
 
 -- Update ModuleManager
@@ -1444,9 +1558,15 @@ function ModuleManager:createAliases()
   self.aliases.disable = tempAlias("^emodule disable (.+)$", [[EMERGE:toggleModule(matches[2], false)]])
   self.aliases.update = tempAlias("^emodule update$", [[EMERGE:checkAllUpdates()]])
   self.aliases.update_registry = tempAlias("^emodule update registry$", [[EMERGE:updateRegistry()]])
-  self.aliases.upgrade = tempAlias("^emodule upgrade manager$", [[EMERGE:upgradeSelf()]])
-  self.aliases.upgrade_short = tempAlias("^emodule upgrade$", [[EMERGE:upgradeSelf()]])
-  self.aliases.upgrade_force = tempAlias("^emodule upgrade force$", [[EMERGE:upgradeSelf(true)]])
+  self.aliases.upgrade = tempAlias("^emodule upgrade (.+)$", [[EMERGE:upgradeComponent(matches[2])]])
+  self.aliases.upgrade_short = tempAlias("^emodule upgrade$", [[
+    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <manager|module|all><reset>\n")
+    cecho("<DimGrey>Examples:<reset>\n")
+    cecho("<DimGrey>  emodule upgrade manager      # Update the manager only<reset>\n")
+    cecho("<DimGrey>  emodule upgrade emerge-core  # Update a specific module<reset>\n")
+    cecho("<DimGrey>  emodule upgrade all          # Update everything<reset>\n")
+  ]])
+  self.aliases.upgrade_force = tempAlias("^emodule upgrade (.+) force$", [[EMERGE:upgradeComponent(matches[2], true)]])
   self.aliases.config = tempAlias("^emodule config$", [[EMERGE:showConfig()]])
   self.aliases.token = tempAlias("^emodule token (.+)$", [[EMERGE:setGitHubToken(matches[2])]])
   self.aliases.token_help = tempAlias("^emodule token$", [[EMERGE:setGitHubToken()]])
@@ -1755,10 +1875,11 @@ function ModuleManager:showHelp()
   <SteelBlue>emodule token <token><reset>    Set GitHub token for private repos
   
 <LightSteelBlue>Update Commands:<reset>
-  <SteelBlue>emodule update<reset>           Check all modules for updates
-  <SteelBlue>emodule upgrade<reset>          Upgrade EMERGE manager itself
-  <SteelBlue>emodule upgrade force<reset>    Force upgrade (bypass version check)
-  <SteelBlue>emodule update registry<reset>  Update the module registry
+  <SteelBlue>emodule update<reset>           Check all components for updates
+  <SteelBlue>emodule upgrade <component><reset>  Upgrade manager, module, or all
+  <SteelBlue>emodule upgrade all<reset>      Upgrade everything that has updates
+  <SteelBlue>emodule upgrade manager<reset>  Upgrade just the manager
+  <SteelBlue>emodule upgrade <module><reset> Upgrade a specific module
   
 <LightSteelBlue>Other Commands:<reset>
   <SteelBlue>emodule config<reset>           Show current configuration
