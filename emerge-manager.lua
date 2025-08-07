@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.3
+-- Version: 0.5.4
 
-local CURRENT_VERSION = "0.5.3"
+local CURRENT_VERSION = "0.5.4"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -465,6 +465,20 @@ function ModuleManager:loadModule(module_id, custom_branch)
   
   if not module_info.github then
     cecho(string.format("<IndianRed>[EMERGE] No GitHub info for module: %s<reset>\n", module_id))
+    if self.config.debug then
+      cecho("<DimGrey>[DEBUG] Module info:<reset>\n")
+      display(module_info)
+    end
+    return
+  end
+  
+  -- Check if we have path info
+  if not module_info.manifest_path and not module_info.github.file then
+    cecho(string.format("<IndianRed>[EMERGE] No file path for module: %s<reset>\n", module_id))
+    if self.config.debug then
+      cecho("<DimGrey>[DEBUG] Missing manifest_path or github.file<reset>\n")
+      display(module_info)
+    end
     return
   end
   
@@ -476,22 +490,16 @@ function ModuleManager:loadModule(module_id, custom_branch)
     cecho(string.format("<yellow>[EMERGE] Using branch: %s<reset>\n", custom_branch))
   end
   
-  -- Build URL based on manifest path or fallback to old method
-  local url
-  if module_info.manifest_path then
-    -- Use manifest path for more precise downloads
-    url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
-      module_info.github.owner,
-      module_info.github.repo,
-      branch,
-      module_info.manifest_path)
-  else
-    -- Fallback to original method
-    url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
-      module_info.github.owner,
-      module_info.github.repo,
-      branch,
-      module_info.github.file)
+  -- Build URL based on available path info
+  local file_path = module_info.manifest_path or module_info.path or module_info.github.file
+  local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
+    module_info.github.owner,
+    module_info.github.repo,
+    branch,
+    file_path)
+  
+  if self.config.debug then
+    cecho(string.format("<DimGrey>[DEBUG] Download URL: %s<reset>\n", url))
   end
   
   cecho(string.format("<DarkOrange>[EMERGE] Downloading %s...<reset>\n", module_id))
@@ -502,32 +510,58 @@ function ModuleManager:loadModule(module_id, custom_branch)
     headers["Authorization"] = "token " .. self.config.github_token
   end
   
-  downloadFile(self.paths.cache .. module_id .. ".lua", url, headers)
-  
-  -- Set up handler for download completion
-  if self.handlers.download then
-    killAnonymousEventHandler(self.handlers.download)
+  -- Clean up any existing handlers
+  if self.handlers.download_success then
+    killAnonymousEventHandler(self.handlers.download_success)
+  end
+  if self.handlers.download_error then
+    killAnonymousEventHandler(self.handlers.download_error)
   end
   
-  self.handlers.download = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
-    if filename:find(module_id .. "%.lua$") then
+  -- Use getHTTP instead of downloadFile for better authentication support
+  self.handlers.download_success = registerAnonymousEventHandler("sysGetHttpDone", function(_, responseUrl, responseBody)
+    if responseUrl == url then
+      killAnonymousEventHandler(self.handlers.download_success)
+      if self.handlers.download_error then killAnonymousEventHandler(self.handlers.download_error) end
+      
       cecho(string.format("<LightSteelBlue>[EMERGE] Downloaded %s<reset>\n", module_id))
       
-      -- Load the module
-      local ok, err = loadfile(filename)
-      if ok then
-        ok, err = pcall(ok)
-        if not ok then
-          cecho(string.format("<IndianRed>[EMERGE] Failed to load %s: %s<reset>\n", module_id, err))
+      -- Save to cache file
+      local cache_file = self.paths.cache .. module_id .. ".lua"
+      local file = io.open(cache_file, "w")
+      if file then
+        file:write(responseBody)
+        file:close()
+        
+        -- Load the module
+        local ok, err = loadfile(cache_file)
+        if ok then
+          ok, err = pcall(ok)
+          if ok then
+            cecho(string.format("<green>[EMERGE] Successfully loaded %s<reset>\n", module_id))
+          else
+            cecho(string.format("<IndianRed>[EMERGE] Failed to load %s: %s<reset>\n", module_id, err))
+          end
+        else
+          cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s: %s<reset>\n", module_id, err))
         end
       else
-        cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s: %s<reset>\n", module_id, err))
+        cecho(string.format("<IndianRed>[EMERGE] Failed to save %s to cache<reset>\n", module_id))
       end
-      
-      killAnonymousEventHandler(self.handlers.download)
-      self.handlers.download = nil
     end
   end)
+  
+  self.handlers.download_error = registerAnonymousEventHandler("sysGetHttpError", function(_, responseUrl, errorMsg)
+    if responseUrl == url then
+      killAnonymousEventHandler(self.handlers.download_success)
+      killAnonymousEventHandler(self.handlers.download_error)
+      
+      cecho(string.format("<IndianRed>[EMERGE] Failed to download %s: %s<reset>\n", module_id, errorMsg or "unknown error"))
+    end
+  end)
+  
+  -- Make the request
+  getHTTP(url, headers)
 end
 
 -- Unload a module  
@@ -977,6 +1011,12 @@ function ModuleManager:discoverRepositories()
             repo = repo_config.repo,
             branch = repo_config.branch
           }
+          
+          -- Convert manifest 'path' field to 'manifest_path' for consistency
+          if module_info.path and not module_info.manifest_path then
+            module_info.manifest_path = module_info.path
+          end
+          
           discovered_modules[id] = module_info
         end
         

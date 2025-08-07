@@ -5,6 +5,25 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2025-08-07
+
+### Fixed
+- **CRITICAL**: Fixed module loading giving zero feedback
+- Replaced `downloadFile` with `getHTTP` for module downloads (same as manifest downloads)
+- Fixed missing `manifest_path` conversion from manifest `path` field
+- Added proper error handling and success messages for module loading
+- Added debug output to help diagnose loading issues
+
+### Root Cause
+- Private repo modules were failing silently because `downloadFile` doesn't handle auth headers properly
+- Manifest modules were missing the `manifest_path` field needed for URL construction
+- No error feedback when downloads failed
+
+### Now Working
+- `emodule load emerge-test-module` should now provide clear feedback
+- Both success and error states are properly reported
+- Private repository modules can be loaded with authentication
+
 ## [0.5.3] - 2025-08-07
 
 ### Fixed
