@@ -5,6 +5,13 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.3] - 2025-01-07
+
+### Changed
+- Reverted to cleaner, simpler quick installer in README
+- Removed unnecessary post-install instructions from installer
+- Simplified installer output for better user experience
+
 ## [1.1.2] - 2025-01-07
 
 ### Added
