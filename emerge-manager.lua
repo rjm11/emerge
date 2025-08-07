@@ -1306,11 +1306,14 @@ function ModuleManager:setGitHubToken(token)
     cecho("  2. Click 'Fine-grained personal access tokens'\n")
     cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
     cecho("  4. Set expiration (90 days recommended)\n")
-    cecho("  5. Select specific repositories:\n")
-    cecho("     • rjm11/emerge\n")
-    cecho("     • rjm11/emerge-private\n")
-    cecho("  6. Permissions: Contents (Read)\n")
-    cecho("  7. Click 'Generate token' at the bottom\n")
+    cecho("  5. Repository access: Select 'Selected repositories'\n")
+    cecho("     - Click the 'Select repositories' dropdown\n")
+    cecho("     - Search for and check: rjm11/emerge\n")
+    cecho("     - Search for and check: rjm11/emerge-private\n")
+    cecho("  6. Scroll down to 'Repository permissions'\n")
+    cecho("     - Find 'Contents' row\n")
+    cecho("     - Click dropdown and select 'Read'\n")
+    cecho("  7. Scroll to bottom, click 'Generate token'\n")
     cecho("  8. Copy the token that starts with 'github_pat_'\n\n")
     cecho("<SteelBlue>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
     return
@@ -1533,12 +1536,14 @@ function ModuleManager:showGitHubHelp()
   2. Click <SteelBlue>"Generate new token"<reset> → <SteelBlue>"Fine-grained personal access tokens"<reset>
   3. Give it a name like <DimGrey>"Mudlet EMERGE Access"<reset>
   4. Set expiration (recommended: <SteelBlue>90 days<reset>)
-  5. Repository access: <SteelBlue>Selected repositories<reset>
-     - Add: rjm11/emerge
-     - Add: rjm11/emerge-private
-  6. Repository permissions:
-     ✓ <SteelBlue>Contents<reset>: Read
-  7. Click <SteelBlue>"Generate token"<reset> at the bottom
+  5. Repository access: Choose <SteelBlue>Selected repositories<reset>
+     - Click <SteelBlue>"Select repositories"<reset> dropdown
+     - Search and check: <DimGrey>rjm11/emerge<reset>
+     - Search and check: <DimGrey>rjm11/emerge-private<reset>
+  6. Scroll down to <SteelBlue>Repository permissions<reset>
+     - Find <SteelBlue>Contents<reset> row
+     - Click dropdown → Select <SteelBlue>Read<reset>
+  7. Scroll to bottom and click <SteelBlue>"Generate token"<reset>
   8. <yellow>IMPORTANT: Copy the token NOW - you won't see it again!<reset>
      Token looks like: <DimGrey>github_pat_xxxxxxxxxxxxxxxxxxxx<reset>
 
