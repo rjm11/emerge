@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.7
+-- Version: 0.5.8
 
-local CURRENT_VERSION = "0.5.7"
+local CURRENT_VERSION = "0.5.8"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -207,6 +207,43 @@ function ModuleManager:register(module_id, module_table)
   self.modules[module_id] = module_table
   cecho(string.format("<LightSteelBlue>[EMERGE] Registered: %s v%s<reset>\n", 
     module_id, module_table.version or "unknown"))
+end
+
+-- Register a module (API alias for compatibility)
+function ModuleManager:registerModule(module_id, module_obj)
+  if not module_id then
+    cecho("<IndianRed>[EMERGE] Error: registerModule requires module_id<reset>\n")
+    return false
+  end
+  
+  if not module_obj then
+    cecho("<IndianRed>[EMERGE] Error: registerModule requires module_obj<reset>\n")
+    return false
+  end
+  
+  -- Check if module is already registered
+  if self.modules[module_id] then
+    cecho(string.format("<yellow>[EMERGE] Warning: Overwriting existing module: %s<reset>\n", module_id))
+  end
+  
+  -- Store the actual module object (not just boolean)
+  self.modules[module_id] = module_obj
+  
+  -- Debug output
+  local version = "unknown"
+  if type(module_obj) == "table" and module_obj.version then
+    version = tostring(module_obj.version)
+  end
+  
+  cecho(string.format("<LightSteelBlue>[EMERGE] Registered module: %s v%s<reset>\n", 
+    module_id, version))
+  
+  -- Emit event for system integration (if event system is available)
+  if achaea and achaea.events then
+    achaea.events:emit("module.installed", module_id)
+  end
+  
+  return true
 end
 
 -- Unregister a module

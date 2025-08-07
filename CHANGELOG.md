@@ -5,6 +5,26 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2025-08-07
+
+### Added
+- **NEW API**: Added `EMERGE:registerModule(module_id, module_obj)` method for proper module registration
+- Module version detection and display during registration
+- Module conflict detection with warnings for overwrites
+- Integration with existing unload system for proper cleanup
+
+### Fixed
+- **CRITICAL**: Fixed "attempt to call method 'registerModule' (a nil value)" error when loading EMERGE modules
+- Modules can now properly register themselves with the manager after loading
+- Module objects are now stored (not just boolean flags) for proper unloading
+- Enhanced module registration feedback with success/error messages
+
+### Improved
+- Better module lifecycle management with proper registration tracking
+- System event emission (`module.installed`) for registered modules
+- Error handling and validation for module registration parameters
+- Backward compatibility with existing module loading mechanisms
+
 ## [0.5.7] - 2025-08-07
 
 ### Fixed
