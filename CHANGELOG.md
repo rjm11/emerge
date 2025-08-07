@@ -5,6 +5,26 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2025-08-07
+
+### Fixed
+- **CRITICAL**: Fixed module loading failure after successful download
+- Enhanced error reporting - no more truncated error messages
+- Added file existence verification before loading
+- Improved error context with full file paths and specific error types
+- Added debug output for module save location and file size
+
+### Added
+- Progress feedback during module loading process
+- Module installation tracking (modules marked as installed)
+- System event emission (`module.installed`) for EMERGE integration
+- Better error categorization (parse errors vs execution errors)
+
+### Improved
+- Complete error messages with context and troubleshooting hints
+- Better debugging information when debug mode is enabled
+- File operation error handling with specific failure reasons
+
 ## [0.5.5] - 2025-08-07
 
 ### Changed

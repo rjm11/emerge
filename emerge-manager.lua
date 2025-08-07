@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.5.5
+-- Version: 0.5.6
 
-local CURRENT_VERSION = "0.5.5"
+local CURRENT_VERSION = "0.5.6"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -533,20 +533,48 @@ function ModuleManager:loadModule(module_id, custom_branch)
         file:write(responseBody)
         file:close()
         
+        -- Debug output
+        if self.config.debug then
+          cecho(string.format("<DimGrey>[DEBUG] Module saved to: %s<reset>\n", cache_file))
+          cecho(string.format("<DimGrey>[DEBUG] File size: %d bytes<reset>\n", #responseBody))
+        end
+        
+        -- Verify file exists before loading
+        if not io.exists(cache_file) then
+          cecho(string.format("<IndianRed>[EMERGE] Failed to save %s - file not found after write<reset>\n", module_id))
+          return
+        end
+        
         -- Load the module
+        cecho(string.format("<DarkOrange>[EMERGE] Loading %s...<reset>\n", module_id))
         local ok, err = loadfile(cache_file)
         if ok then
           ok, err = pcall(ok)
           if ok then
             cecho(string.format("<green>[EMERGE] Successfully loaded %s<reset>\n", module_id))
+            -- Mark module as installed
+            self.modules[module_id] = true
+            -- Emit event for system awareness
+            if achaea and achaea.events then
+              achaea.events:emit("module.installed", module_id)
+            end
           else
-            cecho(string.format("<IndianRed>[EMERGE] Failed to load %s: %s<reset>\n", module_id, err))
+            -- Show full error with context
+            cecho(string.format("<IndianRed>[EMERGE] Failed to execute %s<reset>\n", module_id))
+            cecho(string.format("<DimGrey>Error: %s<reset>\n", tostring(err)))
+            cecho(string.format("<DimGrey>File: %s<reset>\n", cache_file))
           end
         else
-          cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s: %s<reset>\n", module_id, err))
+          -- Show full parsing error with context
+          cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s<reset>\n", module_id))
+          cecho(string.format("<DimGrey>Parse error: %s<reset>\n", tostring(err)))
+          cecho(string.format("<DimGrey>File: %s<reset>\n", cache_file))
+          cecho(string.format("<DimGrey>Check syntax and ensure file is valid Lua<reset>\n"))
         end
       else
-        cecho(string.format("<IndianRed>[EMERGE] Failed to save %s to cache<reset>\n", module_id))
+        cecho(string.format("<IndianRed>[EMERGE] Failed to open cache file for writing<reset>\n"))
+        cecho(string.format("<DimGrey>Attempted path: %s<reset>\n", cache_file))
+        cecho(string.format("<DimGrey>Check permissions and disk space<reset>\n"))
       end
     end
   end)
