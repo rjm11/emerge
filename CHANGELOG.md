@@ -5,6 +5,19 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1] - 2025-01-07
+
+### Fixed
+- Repository naming (changed from "emerge-public" to "emerge")
+- Private repository discovery only attempts when token is set
+- Improved error messages when manifest.json not found
+- Better handling when no repositories are available
+- Fixed pending downloads counter when repos are skipped
+
+### Changed
+- Enabled emerge-private repository by default (with token check)
+- Improved debug output for repository discovery
+
 ## [1.1.0] - 2025-01-07
 
 ### Added

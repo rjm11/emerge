@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.0
+-- Version: 1.1.1
 
-local CURRENT_VERSION = "1.1.0"
+local CURRENT_VERSION = "1.1.1"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -77,31 +77,22 @@ ModuleManager.default_registry = {}
 -- Multi-repository configuration
 ModuleManager.repositories = {
   {
-    name = "emerge-public",
+    name = "emerge",  -- Main public repository
     owner = "rjm11",
     repo = "emerge",
     branch = "main",
     public = true,
-    description = "Public manager and core modules"
+    description = "Public manager and core system"
   },
-  -- Private repos temporarily disabled for testing
-  -- Uncomment when ready:
-  -- {
-  --   name = "emerge-private",
-  --   owner = "rjm11",
-  --   repo = "emerge-private",
-  --   branch = "main",
-  --   public = false,
-  --   description = "Private combat modules"
-  -- },
-  -- {
-  --   name = "emerge-dev",
-  --   owner = "rjm11",
-  --   repo = "emerge-dev",
-  --   branch = "main",
-  --   public = false,
-  --   description = "Development modules"
-  -- }
+  {
+    name = "emerge-private",  -- Private modules repository
+    owner = "rjm11",
+    repo = "emerge-private",
+    branch = "main",
+    public = false,
+    description = "Private combat modules",
+    requires_token = true  -- Only attempt if token is set
+  }
 }
 
 -- GitHub configuration for self-updates (backward compatibility)
@@ -789,9 +780,15 @@ function ModuleManager:discoverRepositories()
   cecho("<DarkOrange>[EMERGE] Discovering modules from repositories...<reset>\n")
   
   for _, repo_config in ipairs(self.repositories) do
-    pending_downloads = pending_downloads + 1
-    
-    self:downloadManifest(repo_config, function(success, modules)
+    -- Skip private repos if no token is set
+    if repo_config.requires_token and not self.config.github_token then
+      if self.config.debug then
+        cecho(string.format("<DimGrey>[DEBUG] Skipping %s (no token)<reset>\n", repo_config.name))
+      end
+    else
+      pending_downloads = pending_downloads + 1
+      
+      self:downloadManifest(repo_config, function(success, modules)
       completed_downloads = completed_downloads + 1
       
       if success and modules then
@@ -809,8 +806,13 @@ function ModuleManager:discoverRepositories()
         cecho(string.format("<DimGrey>[EMERGE] Found %d modules in %s<reset>\n", 
           table.size(modules), repo_config.name))
       else
-        cecho(string.format("<yellow>[EMERGE] Could not access %s repository<reset>\n", 
-          repo_config.name))
+        if self.config.debug then
+          cecho(string.format("<yellow>[EMERGE] Could not access %s repository (check manifest.json)<reset>\n", 
+            repo_config.name))
+        else
+          cecho(string.format("<yellow>[EMERGE] Could not access %s repository<reset>\n", 
+            repo_config.name))
+        end
       end
       
       -- Update cache when all downloads complete
@@ -823,23 +825,33 @@ function ModuleManager:discoverRepositories()
           total_modules))
       end
     end)
+    end  -- End of else block (token check)
   end
   
-  -- Handle timeout and force completion
-  tempTimer(10, function()
-    if completed_downloads < pending_downloads then
-      cecho("<yellow>[EMERGE] Some repositories timed out<reset>\n")
-      -- Force completion with discovered modules so far
-      self.discovery_cache.modules = discovered_modules
-      self.discovery_cache.last_refresh = os.time()
-      
-      local total_modules = table.size(discovered_modules)
-      if total_modules > 0 then
-        cecho(string.format("<LightSteelBlue>[EMERGE] Discovery partial: %d modules available<reset>\n", 
-          total_modules))
+  -- Handle timeout and force completion (only if we're actually downloading)
+  if pending_downloads > 0 then
+    tempTimer(10, function()
+      if completed_downloads < pending_downloads then
+        cecho("<yellow>[EMERGE] Some repositories timed out<reset>\n")
+        -- Force completion with discovered modules so far
+        self.discovery_cache.modules = discovered_modules
+        self.discovery_cache.last_refresh = os.time()
+        
+        local total_modules = table.size(discovered_modules)
+        if total_modules > 0 then
+          cecho(string.format("<LightSteelBlue>[EMERGE] Discovery partial: %d modules available<reset>\n", 
+            total_modules))
+        end
       end
+    end)
+  else
+    -- No repositories to check (likely no token for private repos)
+    self.discovery_cache.modules = discovered_modules
+    self.discovery_cache.last_refresh = os.time()
+    if not self.config.github_token then
+      cecho("<DimGrey>[EMERGE] Set GitHub token to access private repositories<reset>\n")
     end
-  end)
+  end
 end
 
 -- Download manifest from a repository
