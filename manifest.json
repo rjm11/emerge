@@ -5,7 +5,7 @@
   "modules": {
     "emerge-manager": {
       "version": "1.1.0",
-      "path": "manager/emerge-manager.lua",
+      "path": "emerge-manager.lua",
       "type": "required",
       "description": "EMERGE module manager with GitHub discovery",
       "author": "EMERGE Team",
