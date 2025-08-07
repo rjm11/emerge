@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.1
+-- Version: 1.1.2
 
-local CURRENT_VERSION = "1.1.1"
+local CURRENT_VERSION = "1.1.2"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -631,7 +631,18 @@ function ModuleManager:checkSelfUpdate()
 end
 
 -- Update ModuleManager
-function ModuleManager:upgradeSelf()
+function ModuleManager:upgradeSelf(force)
+  -- Skip version check if force is specified
+  if force then
+    cecho("<DarkOrange>[EMERGE] Force upgrade requested - downloading latest version...<reset>\n")
+    self.pending_update = {
+      version = "latest",
+      current = self.version
+    }
+    self:performUpgrade()
+    return
+  end
+  
   -- Check for updates first if we don't have a pending update
   if not self.pending_update then
     cecho("<DimGrey>[EMERGE] Checking for updates...<reset>\n")
@@ -1324,6 +1335,7 @@ function ModuleManager:createAliases()
   self.aliases.update_registry = tempAlias("^emodule update registry$", [[EMERGE:updateRegistry()]])
   self.aliases.upgrade = tempAlias("^emodule upgrade manager$", [[EMERGE:upgradeSelf()]])
   self.aliases.upgrade_short = tempAlias("^emodule upgrade$", [[EMERGE:upgradeSelf()]])
+  self.aliases.upgrade_force = tempAlias("^emodule upgrade force$", [[EMERGE:upgradeSelf(true)]])
   self.aliases.config = tempAlias("^emodule config$", [[EMERGE:showConfig()]])
   self.aliases.token = tempAlias("^emodule token (.+)$", [[EMERGE:setGitHubToken(matches[2])]])
   self.aliases.token_help = tempAlias("^emodule token$", [[EMERGE:setGitHubToken()]])
@@ -1551,6 +1563,7 @@ function ModuleManager:showHelp()
 <LightSteelBlue>Update Commands:<reset>
   <SteelBlue>emodule update<reset>           Check all modules for updates
   <SteelBlue>emodule upgrade<reset>          Upgrade EMERGE manager itself
+  <SteelBlue>emodule upgrade force<reset>    Force upgrade (bypass version check)
   <SteelBlue>emodule update registry<reset>  Update the module registry
   
 <LightSteelBlue>Other Commands:<reset>
