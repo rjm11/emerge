@@ -5,7 +5,22 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.3.1] - 2025-08-07
+## [0.5.0] - 2025-08-07
+
+### IMPORTANT: Version Reset
+- Reset version from 1.3.1 to 0.5.0 to accurately reflect pre-production status
+- EMERGE is functional but still in active development
+- Breaking changes may occur before 1.0.0 release
+- This is beta software - expect bugs and ongoing improvements
+
+### Status
+- Core functionality: Working
+- GitHub integration: Working (public and private repos)
+- Module discovery: Working
+- Branch loading: Working
+- Production ready: **NO** - still in development
+
+## [Previously 1.3.1] - 2025-08-07
 
 ### Changed
 - Standardized all displays to use 100-character width for consistency
