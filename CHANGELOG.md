@@ -5,6 +5,13 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2025-08-07
+
+### Fixed
+- Restored full descriptions in module list
+- Let Mudlet handle word wrapping naturally (no manual line breaks)
+- Descriptions now display on single line, Mudlet wraps as needed
+
 ## [1.2.0] - 2025-08-07
 
 ### Changed
