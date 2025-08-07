@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.3
+-- Version: 1.1.4
 
-local CURRENT_VERSION = "1.1.3"
+local CURRENT_VERSION = "1.1.4"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -821,8 +821,11 @@ function ModuleManager:discoverRepositories()
           cecho(string.format("<yellow>[EMERGE] Could not access %s repository (check manifest.json)<reset>\n", 
             repo_config.name))
         else
-          cecho(string.format("<yellow>[EMERGE] Could not access %s repository<reset>\n", 
-            repo_config.name))
+          -- Only show warning for private repos if we have a token
+          if repo_config.public or self.config.github_token then
+            cecho(string.format("<yellow>[EMERGE] Could not access %s repository<reset>\n", 
+              repo_config.name))
+          end
         end
       end
       
@@ -1287,7 +1290,7 @@ function ModuleManager:setGitHubToken(token)
     cecho("<DarkOrange>[EMERGE] GitHub Token Setup<reset>\n\n")
     cecho("<LightSteelBlue>To create a GitHub personal access token:<reset>\n")
     cecho("  1. Go to ")
-    cechoLink("https://github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open in browser")
+    cechoLink("https://github.com/settings/personal-access-tokens", [[openUrl("https://github.com/settings/personal-access-tokens")]], "Click to open in browser")
     echo("\n")
     cecho("  2. Click 'Generate new token (classic)'\n")
     cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
@@ -1302,7 +1305,29 @@ function ModuleManager:setGitHubToken(token)
   self:saveConfig()
   
   cecho("<LightSteelBlue>[EMERGE] GitHub token saved<reset>\n")
-  cecho("<DimGrey>You can now access private repositories<reset>\n")
+  cecho("<DimGrey>Verifying access to repositories...<reset>\n")
+  
+  -- Force refresh to verify token works
+  self:refreshCache(true)
+  
+  -- After discovery completes, check if we found any private modules
+  tempTimer(2, function()
+    local private_modules_found = false
+    for id, module in pairs(self.discovery_cache.modules or {}) do
+      if module.repository == "emerge-private" then
+        private_modules_found = true
+        break
+      end
+    end
+    
+    if private_modules_found then
+      cecho("<green>[EMERGE] ✓ Successfully connected to private repositories<reset>\n")
+      cecho("<DimGrey>Use 'emodule list' to see available modules<reset>\n")
+    else
+      cecho("<yellow>[EMERGE] ⚠ Token saved but could not access private repositories<reset>\n")
+      cecho("<DimGrey>Please verify your token has 'repo' scope permissions<reset>\n")
+    end
+  end)
 end
 
 -- Create aliases

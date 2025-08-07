@@ -5,6 +5,21 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.4] - 2025-01-07
+
+### Added  
+- Token command now automatically verifies repository access
+- Token command triggers module discovery after saving
+- Verification feedback shows if private repos are accessible
+
+### Changed
+- GitHub token URL updated to correct personal-access-tokens page
+- Discovery only shows warnings for repos we expect to access
+- Improved token verification with actual connectivity test
+
+### Fixed
+- Private repository access verification after token setup
+
 ## [1.1.3] - 2025-01-07
 
 ### Changed
