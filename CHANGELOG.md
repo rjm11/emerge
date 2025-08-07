@@ -5,6 +5,14 @@ All notable changes to the EMERGE manager (emerge-manager.lua) will be documente
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.5] - 2025-08-07
+
+### Fixed
+- GitHub token authorization header format for classic vs fine-grained tokens
+- Classic tokens (ghp_*) now use "token" format
+- Fine-grained tokens (github_pat_*) now use "Bearer" format
+- Auto-detection of token type for proper authorization
+
 ## [1.1.4] - 2025-08-07
 
 ### Added  

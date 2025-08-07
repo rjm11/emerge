@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.4
+-- Version: 1.1.5
 
-local CURRENT_VERSION = "1.1.4"
+local CURRENT_VERSION = "1.1.5"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -880,10 +880,20 @@ function ModuleManager:downloadManifest(repo_config, callback)
     cecho(string.format("<DimGrey>[DEBUG] Fetching: %s<reset>\n", manifest_url))
   end
   
-  -- Headers for private repos - Mudlet uses Bearer format
+  -- Headers for private repos - try token format for classic tokens
   local headers = {}
   if not repo_config.public and self.config.github_token then
-    headers["Authorization"] = "Bearer " .. self.config.github_token
+    -- Use different format based on token type
+    if self.config.github_token:match("^ghp_") then
+      -- Classic personal access token
+      headers["Authorization"] = "token " .. self.config.github_token
+    elseif self.config.github_token:match("^github_pat_") then
+      -- Fine-grained personal access token
+      headers["Authorization"] = "Bearer " .. self.config.github_token
+    else
+      -- Default to token format
+      headers["Authorization"] = "token " .. self.config.github_token
+    end
   end
   
   downloadFile(cache_file, manifest_url, headers)
