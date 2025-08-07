@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 1.1.9
+-- Version: 1.2.0
 
-local CURRENT_VERSION = "1.1.9"
+local CURRENT_VERSION = "1.2.0"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -1553,8 +1553,14 @@ function ModuleManager:listModules()
         repo_info = string.format(" <DimGrey>(%s)<reset>", info.repository)
       end
       
-      cecho(string.format("  <green>◆<reset> <SteelBlue>%s<reset>%s - %s%s\n", 
-        id, version_info, info.name or info.description or "Unknown", repo_info))
+      -- Truncate description if too long
+      local desc = info.name or info.description or "No description"
+      if #desc > 40 then
+        desc = desc:sub(1, 37) .. "..."
+      end
+      
+      cecho(string.format("  <green>◆<reset> <SteelBlue>%s<reset>%s%s\n", 
+        id, version_info, repo_info))
     end
     
     cecho("\n  <LightBlue>→ Quick load all: <SteelBlue>emodule load required<reset>\n")
@@ -1583,8 +1589,9 @@ function ModuleManager:listModules()
         version_info = " v" .. info.version
       end
       
-      cecho(string.format("      <yellow>◇<reset> <SteelBlue>%s<reset>%s - %s\n", 
-        id, version_info, info.name or info.description or "Unknown"))
+      -- Don't show long descriptions
+      cecho(string.format("      <yellow>◇<reset> <SteelBlue>%s<reset>%s\n", 
+        id, version_info))
     end
   end
   
