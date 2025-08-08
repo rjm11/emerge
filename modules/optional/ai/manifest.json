@@ -1,0 +1,44 @@
+{
+  "name": "emerge-ai",
+  "version": "0.5.1",
+  "description": "AI assistant module for EMERGE with multi-provider support",
+  "type": "optional",
+  "author": "EMERGE Development Team",
+  "dependencies": {
+    "emerge-core": ">=0.5.0"
+  },
+  "provides": [
+    "ai",
+    "ai.conversation",
+    "ai.roleplay",
+    "ai.providers"
+  ],
+  "events": {
+    "emitted": [
+      "emerge.ai.command.quick_talk",
+      "emerge.ai.command.roleplay",
+      "emerge.ai.command.change_provider",
+      "emerge.ai.command.recap",
+      "emerge.ai.provider.request",
+      "emerge.ai.provider.response",
+      "emerge.ai.provider.error",
+      "emerge.ai.response.received",
+      "emerge.ai.response.formatted",
+      "emerge.ai.roleplay.generated"
+    ],
+    "listened": [
+      "system.loaded",
+      "system.shutdown",
+      "gmcp.vitals.changed",
+      "command.received"
+    ]
+  },
+  "api": {
+    "config_namespace": "ai",
+    "state_namespace": "ai"
+  },
+  "files": {
+    "main": "ai.lua",
+    "tests": "tests/test_ai.lua"
+  }
+}

@@ -1,0 +1,105 @@
+# Mudlet specific
+*.xml
+*.mpackage
+*.zip
+*.dat
+*.db
+
+# Backup files
+*.bak
+*.backup
+*~
+*.swp
+*.swo
+
+# OS specific
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE specific
+.vscode/
+.idea/
+*.sublime-*
+
+# Logs
+*.log
+logs/
+debug/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# User-specific configuration
+user_config.lua
+personal_settings.lua
+
+# Test output
+test_results/
+coverage/
+
+# Build artifacts
+build/
+dist/
+*.compiled
+
+# Documentation build
+docs/_build/
+*.pdf
+
+# Cache
+.cache/
+__pycache__/
+*.pyc
+
+# Node (if using any web tools)
+node_modules/
+package-lock.json
+
+# Private/sensitive data
+private/
+secrets/
+*.key
+*.pem
+
+# Compiled Lua sources
+luac.out
+
+# luarocks build files
+*.src.rock
+*.tar.gz
+
+# Object files
+*.o
+*.os
+*.ko
+*.obj
+*.elf
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Libraries
+*.lib
+*.a
+*.la
+*.lo
+*.def
+*.exp
+
+# Shared objects (inc. Windows DLLs)
+*.dll
+*.so
+*.so.*
+*.dylib
+
+# Executables
+*.exe
+*.out
+*.app
+*.i*86
+*.x86_64
+*.hex

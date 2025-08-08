@@ -1,0 +1,28 @@
+### Global rules
+
+- **Project**: EMERGE (Mudlet Lua). Follow event-driven architecture and semantic versioning per `CLAUDE.md` and `CLAUDE REFERENCE/`.
+- **Golden rule**: No direct module-to-module calls. Communicate via events (`raiseEvent(...)` or project facade).
+- **Agents-first**: For EMERGE modules, follow the EMERGE agents workflow in `.cursor/rules/agents.md` and `CLAUDE.md`.
+- **Versioning**: Use SemVer. Update code headers, constants, `manifest.json`, and changelogs together.
+- **Context**: Prefer `CLAUDE.md`, `CLAUDE REFERENCE/**`, and `resources/wiki-repo/**` before coding.
+
+### Area guidance
+
+- **`modules/**`, `private-repo/**`**: Event handlers only; use the module template in `README.md`. Emit lifecycle events. Keep output ≤100 chars width. Add/update tests in `tests/**`.
+- **`manager/**` & manifests**: Preserve discovery contracts in `REPOSITORY_STRUCTURE.md`. No implicit auto-updates.
+- **`resources/wiki-repo/**`**: Treat as authoritative mechanics reference.
+
+### Quality & testing
+
+- Target ≥80% coverage for new work. Validate `module.subject.action` event naming. Keep handlers non-blocking.
+
+### Using these rules in Cursor
+
+- Start tasks with: “Use EMERGE agents …” or a specific agent (see `.cursor/rules/agents.md`).
+- When requesting code changes, reference: `CLAUDE.md`, `CLAUDE REFERENCE/**`, `README.md`, `REPOSITORY_STRUCTURE.md`, and the files you’re changing.
+- For mechanics, search `resources/wiki-repo/**` first.
+
+### Do / Don’t
+
+- **Do**: event-driven only; update versions + changelogs together; write tests; keep modules decoupled; follow CLAUDE references.
+- **Don’t**: direct calls; hidden side-effects; blocking handlers; undocumented breaking changes.

@@ -1,0 +1,200 @@
+{
+  "emerge_agent_suite": {
+    "version": "1.1.0",
+    "description": "Specialized AI agents for EMERGE combat system development",
+    "agents": [
+      {
+        "name": "emerge-orchestrator",
+        "description": "EMERGE workflow coordinator and development lifecycle manager. Manages the entire agent suite, coordinating workflows and enforcing quality gates.",
+        "type": "coordination",
+        "capabilities": [
+          "workflow-planning",
+          "agent-coordination",
+          "quality-gates",
+          "context-management",
+          "progress-tracking"
+        ],
+        "tools": ["Task", "TodoWrite"],
+        "proactive": true,
+        "triggers": [
+          "complex task request",
+          "multi-agent workflow",
+          "development project",
+          "quality assurance"
+        ],
+        "examples": [
+          "Create a complete new module with tests",
+          "Debug and fix a complex issue",
+          "Migrate my entire combat system"
+        ]
+      },
+      {
+        "name": "emerge-expert",
+        "description": "EMERGE system architecture expert for validation and guidance. Reviews code for architectural compliance, suggests improvements, and ensures consistency with EMERGE principles.",
+        "type": "validation",
+        "capabilities": [
+          "architectural-validation",
+          "event-flow-analysis", 
+          "documentation-audit",
+          "performance-analysis",
+          "educational-guidance"
+        ],
+        "tools": ["Read", "Grep", "Glob", "LS"],
+        "proactive": true,
+        "triggers": [
+          "module creation",
+          "architecture changes",
+          "pre-commit validation",
+          "performance issues"
+        ],
+        "examples": [
+          "Review this module for EMERGE compliance",
+          "Check if my event patterns are correct",
+          "Validate architectural adherence"
+        ]
+      },
+      {
+        "name": "emerge-coder",
+        "description": "EMERGE system code generator and implementation specialist. Creates new modules, refactors existing code, and implements complex combat logic following EMERGE patterns.",
+        "type": "implementation",
+        "capabilities": [
+          "module-generation",
+          "event-implementation",
+          "combat-logic",
+          "code-refactoring",
+          "performance-optimization"
+        ],
+        "tools": ["Read", "Write", "Edit", "MultiEdit", "Grep", "Glob"],
+        "proactive": false,
+        "triggers": [
+          "module creation request",
+          "code refactoring needed",
+          "feature implementation",
+          "performance optimization"
+        ],
+        "examples": [
+          "Create a new affliction tracking module",
+          "Refactor this code to use events",
+          "Implement curing priority logic"
+        ]
+      },
+      {
+        "name": "emerge-tester",
+        "description": "Automated testing and validation specialist for EMERGE. Generates comprehensive test suites, simulates combat scenarios, and validates module interactions.",
+        "type": "testing",
+        "capabilities": [
+          "test-generation",
+          "test-execution",
+          "combat-simulation",
+          "performance-testing",
+          "regression-detection"
+        ],
+        "tools": ["Read", "Write", "Edit", "Bash", "Grep"],
+        "proactive": true,
+        "triggers": [
+          "module completed",
+          "code refactored",
+          "pre-commit check",
+          "performance concerns"
+        ],
+        "examples": [
+          "Generate tests for the curing module",
+          "Run combat simulation tests",
+          "Check for performance regressions"
+        ]
+      },
+      {
+        "name": "emerge-migrator",
+        "description": "Migration and upgrade specialist for EMERGE. Converts existing combat systems (SVOF, Legacy) to EMERGE architecture and handles version upgrades.",
+        "type": "migration",
+        "capabilities": [
+          "system-analysis",
+          "code-migration",
+          "data-migration",
+          "compatibility-layers",
+          "version-upgrades"
+        ],
+        "tools": ["Read", "Write", "MultiEdit", "Grep", "Glob", "Bash"],
+        "proactive": false,
+        "triggers": [
+          "migration request",
+          "version upgrade",
+          "system conversion",
+          "compatibility issues"
+        ],
+        "examples": [
+          "Migrate my SVOF system to EMERGE",
+          "Upgrade EMERGE from v1.0 to v2.0",
+          "Create compatibility layer for legacy code"
+        ]
+      },
+      {
+        "name": "emerge-debugger",
+        "description": "Runtime debugging and diagnostics specialist for EMERGE. Traces event flows, profiles performance, and diagnoses complex issues in the event-driven system.",
+        "type": "debugging",
+        "capabilities": [
+          "event-tracing",
+          "state-debugging",
+          "performance-profiling",
+          "error-diagnostics",
+          "combat-analysis"
+        ],
+        "tools": ["Read", "Grep", "Bash"],
+        "proactive": false,
+        "triggers": [
+          "performance issues",
+          "unexpected behavior",
+          "error debugging",
+          "event flow problems",
+          "combat logic issues"
+        ],
+        "examples": [
+          "Debug why events aren't firing",
+          "Profile combat performance",
+          "Trace affliction tracking issues"
+        ]
+      }
+    ],
+    "usage_guidelines": {
+      "workflow": [
+        "Use emerge-orchestrator for complex multi-step tasks",
+        "Use emerge-expert to validate architecture before starting",
+        "Use emerge-coder to generate new modules or refactor code",
+        "Use emerge-tester to create and run tests",
+        "Use emerge-debugger when issues arise",
+        "Use emerge-migrator for system conversions"
+      ],
+      "best_practices": [
+        "Always validate with emerge-expert before committing",
+        "Generate tests with emerge-tester for new features",
+        "Profile with emerge-debugger for performance issues",
+        "Use emerge-coder for consistent code generation",
+        "Leverage emerge-migrator for legacy code updates"
+      ],
+      "agent_cooperation": [
+        "emerge-coder generates code → emerge-expert validates",
+        "emerge-expert finds issues → emerge-coder fixes",
+        "emerge-coder implements → emerge-tester validates",
+        "emerge-debugger identifies problems → emerge-coder resolves",
+        "emerge-migrator converts → emerge-expert ensures compliance"
+      ]
+    },
+    "invocation_examples": {
+      "new_module": [
+        "Task: emerge-coder 'Create a new stance tracking module'",
+        "Task: emerge-expert 'Review the stance module'",
+        "Task: emerge-tester 'Generate tests for stance module'"
+      ],
+      "debugging_session": [
+        "Task: emerge-debugger 'Trace event flow for curing'",
+        "Task: emerge-debugger 'Profile combat performance'",
+        "Task: emerge-expert 'Identify architectural issues'"
+      ],
+      "migration_project": [
+        "Task: emerge-migrator 'Analyze SVOF installation'",
+        "Task: emerge-migrator 'Create compatibility layer'",
+        "Task: emerge-expert 'Validate migrated code'"
+      ]
+    }
+  }
+}
