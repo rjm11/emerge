@@ -50,6 +50,8 @@ end
 EMERGE.modules = EMERGE.modules or {}
 EMERGE.aliases = {}
 EMERGE.handlers = {}
+EMERGE.overwrite_queue = {}
+EMERGE.overwrite_in_progress = false
 
 -- For backward compatibility
 ModuleManager = EMERGE
@@ -92,6 +94,16 @@ ModuleManager.repositories = {
     public = false,
     description = "Private combat modules",
     requires_token = true  -- Only attempt if token is set
+  },
+  {
+    name = "emerge-dev",  -- Developer modules repository
+    owner = "rjm11",
+    repo = "emerge-dev",
+    branch = "main",
+    public = false,
+    description = "Untested developer modules",
+    requires_token = true,
+    dev_only = true
   }
 }
 
@@ -497,6 +509,62 @@ function ModuleManager:loadModule(module_id, custom_branch)
     return
   end
   
+  if self.modules[module_id] and not self.pending_overwrite then
+    if self.overwrite_in_progress then
+      table.insert(self.overwrite_queue, {module_id = module_id, custom_branch = custom_branch})
+      cecho(string.format("<yellow>[EMERGE] Another overwrite is in progress. Queuing '%s'.<reset>\n", module_id))
+      return
+    end
+
+    cecho(string.format("<yellow>[EMERGE] Module '%s' is already loaded. Overwrite? (yes/no)<reset>\n", module_id))
+
+    self.overwrite_in_progress = true
+    self.pending_overwrite = { module_id = module_id, custom_branch = custom_branch }
+
+    local confirm_alias = "emerge_overwrite_confirm"
+    local cancel_alias = "emerge_overwrite_cancel"
+
+    if self.aliases[confirm_alias] then killAlias(self.aliases[confirm_alias]) end
+    if self.aliases[cancel_alias] then killAlias(self.aliases[cancel_alias]) end
+
+    self.aliases[confirm_alias] = tempAlias("^(yes)$", [[
+      local pending = EMERGE.pending_overwrite
+      if pending then
+        cecho(string.format("<LightSteelBlue>[EMERGE] Overwriting module '%s'...<reset>\n", pending.module_id))
+        EMERGE:_executeLoadModule(pending.module_id, pending.custom_branch)
+        EMERGE.pending_overwrite = nil
+      end
+      killAlias(EMERGE.aliases.emerge_overwrite_confirm)
+      killAlias(EMERGE.aliases.emerge_overwrite_cancel)
+      EMERGE.aliases.emerge_overwrite_confirm = nil
+      EMERGE.aliases.emerge_overwrite_cancel = nil
+      EMERGE.overwrite_in_progress = false
+      EMERGE:_processOverwriteQueue()
+    ]])
+
+    self.aliases[cancel_alias] = tempAlias("^(.*)$", [[
+      if matches[2] ~= "yes" then
+        local pending = EMERGE.pending_overwrite
+        if pending then
+          cecho(string.format("<IndianRed>[EMERGE] Aborted overwriting module '%s'.<reset>\n", pending.module_id))
+          EMERGE.pending_overwrite = nil
+        end
+        killAlias(EMERGE.aliases.emerge_overwrite_confirm)
+        killAlias(EMERGE.aliases.emerge_overwrite_cancel)
+        EMERGE.aliases.emerge_overwrite_confirm = nil
+        EMERGE.aliases.emerge_overwrite_cancel = nil
+        EMERGE.overwrite_in_progress = false
+        EMERGE:_processOverwriteQueue()
+      end
+    ]])
+
+    return
+  end
+
+  self:_executeLoadModule(module_id, custom_branch)
+end
+
+function ModuleManager:_executeLoadModule(module_id, custom_branch)
   local module_info = self:getModuleList()[module_id]
   if not module_info then
     cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
@@ -508,13 +576,10 @@ function ModuleManager:loadModule(module_id, custom_branch)
   -- Check and load dependencies first
   if module_info.dependencies and type(module_info.dependencies) == "table" then
     for _, dependency in ipairs(module_info.dependencies) do
-      -- Check if dependency is already loaded
       if not self.modules[dependency] then
         cecho(string.format("<DarkOrange>[EMERGE] Loading dependency: %s<reset>\n", dependency))
-        -- Recursively load the dependency
         self:loadModule(dependency, custom_branch)
         
-        -- Wait a moment for dependency to load before continuing
         tempTimer(0.5, function()
           if not self.modules[dependency] then
             cecho(string.format("<IndianRed>[EMERGE] Failed to load dependency: %s<reset>\n", dependency))
@@ -539,7 +604,6 @@ function ModuleManager:loadModule(module_id, custom_branch)
     return
   end
   
-  -- Check if we have path info
   if not module_info.manifest_path and not module_info.github.file then
     cecho(string.format("<IndianRed>[EMERGE] No file path for module: %s<reset>\n", module_id))
     if self.config.debug then
@@ -549,15 +613,12 @@ function ModuleManager:loadModule(module_id, custom_branch)
     return
   end
   
-  -- Use custom branch if provided, otherwise use module's default branch
   local branch = custom_branch or module_info.github.branch or "main"
   
-  -- Show branch info if custom branch is being used
   if custom_branch then
     cecho(string.format("<yellow>[EMERGE] Using branch: %s<reset>\n", custom_branch))
   end
   
-  -- Build URL based on available path info
   local file_path = module_info.manifest_path or module_info.path or module_info.github.file
   local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
     module_info.github.owner,
@@ -571,13 +632,11 @@ function ModuleManager:loadModule(module_id, custom_branch)
   
   cecho(string.format("<DarkOrange>[EMERGE] Downloading %s...<reset>\n", module_id))
   
-  -- Add headers for private repos if token is available
   local headers = {}
   if self.config.github_token then
     headers["Authorization"] = "token " .. self.config.github_token
   end
   
-  -- Clean up any existing handlers
   if self.handlers.download_success then
     killAnonymousEventHandler(self.handlers.download_success)
   end
@@ -585,7 +644,6 @@ function ModuleManager:loadModule(module_id, custom_branch)
     killAnonymousEventHandler(self.handlers.download_error)
   end
   
-  -- Use getHTTP instead of downloadFile for better authentication support
   self.handlers.download_success = registerAnonymousEventHandler("sysGetHttpDone", function(_, responseUrl, responseBody)
     if responseUrl == url then
       killAnonymousEventHandler(self.handlers.download_success)
@@ -593,46 +651,38 @@ function ModuleManager:loadModule(module_id, custom_branch)
       
       cecho(string.format("<LightSteelBlue>[EMERGE] Downloaded %s<reset>\n", module_id))
       
-      -- Save to cache file
       local cache_file = self.paths.cache .. module_id .. ".lua"
       local file = io.open(cache_file, "w")
       if file then
         file:write(responseBody)
         file:close()
         
-        -- Debug output
         if self.config.debug then
           cecho(string.format("<DimGrey>[DEBUG] Module saved to: %s<reset>\n", cache_file))
           cecho(string.format("<DimGrey>[DEBUG] File size: %d bytes<reset>\n", #responseBody))
         end
         
-        -- Verify file exists before loading
         if not io.exists(cache_file) then
           cecho(string.format("<IndianRed>[EMERGE] Failed to save %s - file not found after write<reset>\n", module_id))
           return
         end
         
-        -- Load the module
         cecho(string.format("<DarkOrange>[EMERGE] Loading %s...<reset>\n", module_id))
         local ok, err = loadfile(cache_file)
         if ok then
           ok, err = pcall(ok)
           if ok then
             cecho(string.format("<green>[EMERGE] Successfully loaded %s<reset>\n", module_id))
-            -- Mark module as installed
             self.modules[module_id] = true
-            -- Emit event for system awareness
             if achaea and achaea.events then
               achaea.events:emit("module.installed", module_id)
             end
           else
-            -- Show full error with context
             cecho(string.format("<IndianRed>[EMERGE] Failed to execute %s<reset>\n", module_id))
             cecho(string.format("<DimGrey>Error: %s<reset>\n", tostring(err)))
             cecho(string.format("<DimGrey>File: %s<reset>\n", cache_file))
           end
         else
-          -- Show full parsing error with context
           cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s<reset>\n", module_id))
           cecho(string.format("<DimGrey>Parse error: %s<reset>\n", tostring(err)))
           cecho(string.format("<DimGrey>File: %s<reset>\n", cache_file))
@@ -655,8 +705,16 @@ function ModuleManager:loadModule(module_id, custom_branch)
     end
   end)
   
-  -- Make the request
   getHTTP(url, headers)
+end
+
+function ModuleManager:_processOverwriteQueue()
+  if #self.overwrite_queue > 0 then
+    local next_load = table.remove(self.overwrite_queue, 1)
+    tempTimer(0.5, function()
+      EMERGE:loadModule(next_load.module_id, next_load.custom_branch)
+    end)
+  end
 end
 
 -- Unload a module  
@@ -1714,6 +1772,58 @@ function ModuleManager:setGitHubToken(token)
   end)
 end
 
+-- Show developer module warning
+function ModuleManager:showDevModuleWarning()
+  cecho("<yellow>WARNING: This command will pull and install untested developer modules from the emerge-dev repository.<reset>\n")
+  cecho("<yellow>These modules may be unstable and could cause issues.<reset>\n")
+  cecho("<LightSteelBlue>To proceed, type: edev confirm<reset>\n")
+end
+
+-- Execute loading of developer modules
+function ModuleManager:_executeLoadDevModules()
+  cecho("<green>[EMERGE] Loading developer modules...<reset>\n")
+
+  local dev_repo
+  for _, repo_config in ipairs(self.repositories) do
+    if repo_config.name == "emerge-dev" then
+      dev_repo = repo_config
+      break
+    end
+  end
+
+  if not dev_repo then
+    cecho("<red>[EMERGE] emerge-dev repository not configured.<reset>\n")
+    return
+  end
+
+  cecho(string.format("<DimGrey>[EMERGE] Fetching manifest from %s...<reset>\n", dev_repo.name))
+
+  self:downloadManifest(dev_repo, function(success, modules)
+    if success and modules then
+      -- First, update the discovery cache with the dev modules
+      for id, module_info in pairs(modules) do
+        module_info.repository = dev_repo.name
+        self.discovery_cache.modules[id] = module_info
+      end
+
+      local module_count = table.size(modules)
+      cecho(string.format("<LightSteelBlue>[EMERGE] Found %d developer modules. Installing...<reset>\n", module_count))
+
+      local i = 0
+      for id, module_info in pairs(modules) do
+        i = i + 1
+        -- Use a timer to load modules one by one
+        tempTimer(i * 0.5, function()
+          cecho(string.format("<DimGrey>[%d/%d] Loading %s...<reset>\n", i, module_count, id))
+          self:loadModule(id)
+        end)
+      end
+    else
+      cecho(string.format("<red>[EMERGE] Failed to download manifest from %s.<reset>\n", dev_repo.name))
+    end
+  end)
+end
+
 -- Create aliases
 function ModuleManager:createAliases()
   -- Clean up old aliases
@@ -1783,6 +1893,10 @@ function ModuleManager:createAliases()
     end
   ]])
   
+  -- Developer commands
+  self.aliases.edev = tempAlias("^edev$", [[EMERGE:showDevModuleWarning()]])
+  self.aliases.edev_confirm = tempAlias("^edev confirm$", [[EMERGE:_executeLoadDevModules()]])
+
   -- New discovery commands
   self.aliases.refresh = tempAlias("^emodule refresh$", [[EMERGE:refreshCache(true)]])
   self.aliases.repos = tempAlias("^emodule repos$", [[EMERGE:listRepositories()]])
@@ -2078,6 +2192,10 @@ function ModuleManager:showHelp()
 <LightSteelBlue>Other Commands:<reset>
   <SteelBlue>emodule config<reset>           Show current configuration
   <SteelBlue>emodule help<reset>             Show this help (or just 'emodule')
+
+<LightSteelBlue>Developer Commands:<reset>
+  <SteelBlue>edev<reset>                     Show warning and instructions for developer modules
+  <SteelBlue>edev confirm<reset>             Load all modules from the emerge-dev repository
 
 <DimGrey>Configuration: ]] .. self.paths.config .. [[<reset>
 ]])
