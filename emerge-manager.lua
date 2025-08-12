@@ -1326,7 +1326,7 @@ function ModuleManager:downloadManifest(repo_config, callback)
       if error_handler then killAnonymousEventHandler(error_handler) end
       if timeout_handler then killTimer(timeout_handler) end
       
-      http_status = tonumber(http_status) or 0
+      http_status = tonumber(http_status)
 
       if http_status == 200 then
         local ok, manifest = pcall(yajl.to_value, responseBody)
