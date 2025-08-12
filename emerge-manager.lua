@@ -53,6 +53,7 @@ EMERGE.handlers = {}
 EMERGE.overwrite_queue = {}
 EMERGE.overwrite_in_progress = false
 EMERGE.discovery_in_progress = false
+EMERGE.discovery_callbacks = {}
 
 -- For backward compatibility
 ModuleManager = EMERGE
@@ -191,6 +192,19 @@ function ModuleManager:saveCustomModules()
   end
 end
 
+-- Get authorization headers for GitHub requests
+function ModuleManager:_getAuthHeaders()
+  local headers = {}
+  if self.config and self.config.github_token then
+    if self.config.github_token:match("^github_pat_") then
+      headers["Authorization"] = "Bearer " .. self.config.github_token
+    else
+      headers["Authorization"] = "token " .. self.config.github_token
+    end
+  end
+  return headers
+end
+
 -- Get complete module list (default + custom + discovered)
 function ModuleManager:getModuleList()
   local all_modules = {}
@@ -229,8 +243,8 @@ function ModuleManager:registerModule(module_id, module_obj)
     return false
   end
   
-  if not module_obj then
-    cecho("<IndianRed>[EMERGE] Error: registerModule requires module_obj<reset>\n")
+  if not module_obj or type(module_obj) ~= "table" then
+    cecho("<IndianRed>[EMERGE] Error: registerModule requires a table, but got " .. type(module_obj) .. "<reset>\n")
     return false
   end
   
@@ -333,11 +347,8 @@ function ModuleManager:addGitHub(github_url)
       owner, repo, file)
     
     -- Use GitHub API to check if file exists
-    local headers = {}
-    if self.config.github_token then
-      headers["Authorization"] = "token " .. self.config.github_token
-      headers["Accept"] = "application/vnd.github.v3.raw"
-    end
+    local headers = self:_getAuthHeaders()
+    headers["Accept"] = "application/vnd.github.v3.raw"
     
     downloadFile(self.paths.cache .. "github-check.json", check_url, headers)
     
@@ -565,13 +576,22 @@ function ModuleManager:loadModule(module_id, custom_branch)
   self:_executeLoadModule(module_id, custom_branch)
 end
 
-function ModuleManager:_executeLoadModule(module_id, custom_branch, on_complete)
+function ModuleManager:_executeLoadModule(module_id, custom_branch, on_complete, has_refreshed)
   local module_info = self:getModuleList()[module_id]
   if not module_info then
-    cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
-    cecho("<DimGrey>Try 'emodule list' to see available modules<reset>\n")
-    cecho("<DimGrey>Or 'emodule refresh' to update module list<reset>\n")
-    if on_complete then on_complete(false) end
+    -- If we've already refreshed and the module is still not found, give up.
+    if has_refreshed then
+      cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s (even after refresh)<reset>\n", module_id))
+      if on_complete then on_complete(false) end
+      return
+    end
+
+    cecho(string.format("<yellow>[EMERGE] Unknown module '%s'. Refreshing cache...<reset>\n", module_id))
+    self:refreshCache(true, function()
+      cecho(string.format("<LightSteelBlue>[EMERGE] Cache refreshed. Retrying load for '%s'...<reset>\n", module_id))
+      -- Retry loading, and pass 'true' for has_refreshed to prevent infinite loops.
+      self:_executeLoadModule(module_id, custom_branch, on_complete, true)
+    end)
     return
   end
   
@@ -659,8 +679,7 @@ function ModuleManager:_downloadAndLoad(module_id, custom_branch, module_info, o
   if self.config.debug then cecho(string.format("<DimGrey>[DEBUG] Download URL: %s<reset>\n", url)) end
   cecho(string.format("<DarkOrange>[EMERGE] Downloading %s...<reset>\n", module_id))
 
-  local headers = {}
-  if self.config.github_token then headers["Authorization"] = "token " .. self.config.github_token end
+  local headers = self:_getAuthHeaders()
 
   -- Kill old handlers to prevent multiple triggers
   if self.handlers["download_success_" .. module_id] then killAnonymousEventHandler(self.handlers["download_success_" .. module_id]) end
@@ -860,10 +879,7 @@ function ModuleManager:checkSelfUpdateAsync(callback)
     self.github.files.manager)
   
   -- Add headers for private repos if token is available
-  local headers = {}
-  if self.config.github_token then
-    headers["Authorization"] = "token " .. self.config.github_token
-  end
+  local headers = self:_getAuthHeaders()
   
   -- Generate unique filename to avoid conflicts
   local check_file = self.paths.cache .. "module-manager-check-" .. os.time() .. ".lua"
@@ -1089,10 +1105,7 @@ function ModuleManager:upgradeSelf(force)
       os.time())
     
     -- Add headers for private repos if token is available
-    local headers = {}
-    if self.config.github_token then
-      headers["Authorization"] = "token " .. self.config.github_token
-    end
+    local headers = self:_getAuthHeaders()
     
     -- Ensure cache directory exists
     if not io.exists(self.paths.cache) then
@@ -1217,14 +1230,22 @@ end
 
 -- Discover repositories and cache modules
 function ModuleManager:discoverRepositories(on_discovery_complete)
+  -- If a discovery is already in progress, queue the callback and return.
   if self.discovery_in_progress then
     if self.config.debug then
-      cecho("<yellow>[DEBUG] Discovery process is already running. Ignoring request.<reset>\n")
+      cecho("<yellow>[DEBUG] Discovery process is already running. Queuing callback.<reset>\n")
     end
-    if on_discovery_complete then on_discovery_complete() end
+    if on_discovery_complete then
+      table.insert(self.discovery_callbacks, on_discovery_complete)
+    end
     return
   end
   self.discovery_in_progress = true
+
+  -- Add the current callback to the queue, so it's handled along with any others.
+  if on_discovery_complete then
+    table.insert(self.discovery_callbacks, on_discovery_complete)
+  end
 
   local pending_downloads = 0
   local completed_downloads = 0
@@ -1239,12 +1260,18 @@ function ModuleManager:discoverRepositories(on_discovery_complete)
     self.discovery_cache.last_refresh = os.time()
 
     local total_modules = table.size(discovered_modules)
-    cecho(string.format("<LightSteelBlue>[EMERGE] Discovery complete: %d modules available<reset>\n", total_modules))
+    if total_modules > 0 and not self.silent_check then
+      cecho(string.format("<LightSteelBlue>[EMERGE] Discovery complete: %d modules available<reset>\n", total_modules))
+    end
 
     self.discovery_in_progress = false -- Release the lock
 
-    if on_discovery_complete then
-      on_discovery_complete()
+    -- Execute all queued callbacks
+    local callbacks_to_run = self.discovery_callbacks
+    -- Clear the queue before running, in case a callback triggers a new discovery
+    self.discovery_callbacks = {}
+    for _, callback in ipairs(callbacks_to_run) do
+      pcall(callback) -- Use pcall for safety
     end
   end
 
@@ -1308,14 +1335,8 @@ function ModuleManager:downloadManifest(repo_config, callback)
   end
   
   local headers = {}
-  if not repo_config.public and self.config.github_token then
-    if self.config.github_token:match("^ghp_") then
-      headers["Authorization"] = "token " .. self.config.github_token
-    elseif self.config.github_token:match("^github_pat_") then
-      headers["Authorization"] = "Bearer " .. self.config.github_token
-    else
-      headers["Authorization"] = "token " .. self.config.github_token
-    end
+  if not repo_config.public then
+    headers = self:_getAuthHeaders()
   end
   
   local success_handler, error_handler, timeout_handler
