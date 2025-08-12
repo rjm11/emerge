@@ -1,29 +1,47 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
--- Self-updating module system with external configuration
--- Version: 0.5.9
+-- Manager script for discovering, downloading, loading, and unloading EMERGE modules.
+-- Heavily commented to explain intent, behavior, and Mudlet-specific mechanics.
+--
+-- High-level responsibilities:
+-- - Maintain configuration (JSON files in Mudlet home dir)
+-- - Discover modules from one or more GitHub repositories (public/private)
+-- - Download and load module Lua files into the current Mudlet profile
+-- - Track loaded modules and provide convenience aliases (emodule ...)
+-- - Self-update the manager by fetching a newer version from GitHub
+-- - Create a persistent bootloader script so EMERGE loads on Mudlet start
+--
+-- Environment assumptions (Mudlet):
+-- - Functions like cecho/echo, tempTimer, registerAnonymousEventHandler, downloadFile,
+--   exists/permGroup/permScript/enableScript/killScript/saveProfile, etc. are available.
+-- - yajl is available for JSON encode/decode (yajl.to_value / yajl.to_string).
+-- - lfs is available for filesystem ops like lfs.mkdir.
+--
+-- Version: 0.6.1
 
-local CURRENT_VERSION = "0.5.9"
+-- The current manager version used for self-update comparison
+local CURRENT_VERSION = "0.6.1"
 local MANAGER_ID = "EMERGE"
 
--- Check if already loaded and handle version updates
+-- On re-execution (e.g., after an update), avoid double-loading.
+-- If an older version is loaded, preserve state across the reload.
 if EMERGE and EMERGE.loaded then
   if EMERGE.version ~= CURRENT_VERSION then
     cecho(string.format("<DarkOrange>[EMERGE] Version update: %s -> %s<reset>\n", 
       EMERGE.version, CURRENT_VERSION))
     
-    -- Preserve important data
+    -- Preserve important data to restore after new script executes
     local preserved = {
       modules = EMERGE.modules,
       config = EMERGE.config,
       custom_modules = EMERGE.custom_modules
     }
     
-    -- Unload old version
+    -- Unload old version but keep modules in memory (updating=true)
     if EMERGE.unload then
       EMERGE:unload(true) -- true = updating, don't unload modules
     end
     
-    -- Restore data after module recreation
+    -- After this script redefines EMERGE, restore preserved state
     tempTimer(0.1, function()
       if EMERGE and preserved then
         EMERGE.modules = preserved.modules
@@ -32,7 +50,7 @@ if EMERGE and EMERGE.loaded then
       end
     end)
   else
-    -- Already loaded - check if this is during initial setup
+    -- Already loaded and same version: only print a notice outside install/bootloader phases
     if not (EMERGE.installing or EMERGE.creating_bootloader) then
       cecho("<DarkOrange>[EMERGE] Already loaded.<reset>\n")
     end
@@ -40,7 +58,7 @@ if EMERGE and EMERGE.loaded then
   end
 end
 
--- Create EMERGE Manager
+-- Create (or reuse) the EMERGE manager table
 EMERGE = EMERGE or {}
 EMERGE.version = CURRENT_VERSION
 -- Don't reset loaded flag if we're updating
@@ -49,16 +67,15 @@ if not EMERGE.loaded then
 end
 EMERGE.modules = EMERGE.modules or {}
 EMERGE.aliases = {}
-EMERGE.handlers = {}
-EMERGE.overwrite_queue = {}
-EMERGE.overwrite_in_progress = false
-EMERGE.discovery_in_progress = false
-EMERGE.discovery_callbacks = {}
+EMERGE.handlers = { downloads = {} }
 
--- For backward compatibility
+-- Flag to prevent concurrent discovery processes
+EMERGE.discovery_in_progress = false
+
+-- For backward compatibility with older references
 ModuleManager = EMERGE
 
--- Utility function for counting table entries
+-- Utility: number of keys in a table
 if not table.size then
   function table.size(t)
     local count = 0
@@ -67,49 +84,49 @@ if not table.size then
   end
 end
 
--- Configuration paths
+-- Paths to persisted files in Mudlet home directory
 ModuleManager.paths = {
   config = getMudletHomeDir() .. "/emerge-config.json",
   custom = getMudletHomeDir() .. "/emerge-custom-modules.json",
   cache = getMudletHomeDir() .. "/emerge-cache/"
 }
 
--- Default module registry - empty until modules are actually created
--- Modules can be added via 'emodule github' command
+-- Built-in module registry (if any are shipped by default). Empty by default.
+-- Users can add modules at runtime; those are stored in custom_modules.
 ModuleManager.default_registry = {}
 
--- Multi-repository configuration
+-- Repositories to search for manifests describing modules.
+-- - public=true means no token required. private=false requires a GitHub token.
 ModuleManager.repositories = {
   {
-    name = "emerge",  -- Main public repository
+    name = "emerge-public",
     owner = "rjm11",
     repo = "emerge",
     branch = "main",
     public = true,
-    description = "Public manager and core system"
+    description = "Public manager and core modules"
   },
   {
-    name = "emerge-private",  -- Private modules repository
+    name = "emerge-private",
     owner = "rjm11",
     repo = "emerge-private",
     branch = "main",
     public = false,
-    description = "Private combat modules",
-    requires_token = true  -- Only attempt if token is set
+    description = "Private combat modules"
   },
   {
-    name = "emerge-dev",  -- Developer modules repository
+    name = "emerge-dev",
     owner = "rjm11",
     repo = "emerge-dev",
     branch = "main",
     public = false,
-    description = "Untested developer modules",
-    requires_token = true,
-    dev_only = true
+    description = "Development modules",
+    -- Optional: path to manifest if not in root.
+    manifest_path = "modules/manifest.json"
   }
 }
 
--- GitHub configuration for self-updates (backward compatibility)
+-- Legacy/self-update location for the manager itself. Used by checkSelfUpdate/upgradeSelf.
 ModuleManager.github = {
   owner = "rjm11",
   repo = "emerge",
@@ -121,7 +138,7 @@ ModuleManager.github = {
   last_check = 0
 }
 
--- Discovery cache
+-- Cache of discovered modules and manifests to avoid hammering GitHub on every command.
 ModuleManager.discovery_cache = {
   last_refresh = 0,
   cache_duration = 3600, -- 1 hour
@@ -129,7 +146,56 @@ ModuleManager.discovery_cache = {
   modules = {} -- Flat list of all discovered modules
 }
 
--- Load configuration from file
+-- Cache of locally discovered modules.
+ModuleManager.local_modules_cache = {}
+
+-- Scans the local modules directory for installable modules.
+function ModuleManager:discoverLocalModules()
+  -- Reset cache
+  self.local_modules_cache = {}
+
+  local modules_dir = "modules/"
+  if not io.exists(modules_dir) and getMudletHomeDir then
+    modules_dir = getMudletHomeDir() .. "/modules/"
+  end
+
+  local module_types = { "required", "optional" }
+
+  for _, type in ipairs(module_types) do
+    local path = modules_dir .. type .. "/"
+    if io.exists(path) then
+      for dir in lfs.dir(path) do
+        if dir ~= "." and dir ~= ".." then
+          local module_path = path .. dir
+          if lfs.attributes(module_path, "mode") == "directory" then
+            local manifest_path = module_path .. "/manifest.json"
+            if io.exists(manifest_path) then
+              local file = io.open(manifest_path, "r")
+              if file then
+                local content = file:read("*all")
+                file:close()
+                local ok, manifest = pcall(yajl.to_value, content)
+                if ok and manifest and manifest.name then
+                  manifest.is_local = true
+                  manifest.local_path = module_path
+                  manifest.repository = "local/" .. type
+                  self.local_modules_cache[manifest.name] = manifest
+                  if self.config.debug then
+                    cecho(string.format("<DimGrey>[EMERGE] Found local module: %s<reset>\n", manifest.name))
+                  end
+                elseif self.config.debug then
+                  cecho(string.format("<yellow>[EMERGE] Warning: Could not parse manifest for local module at %s<reset>\n", module_path))
+                end
+              end
+            end
+          end
+        end
+      end
+    end
+  end
+end
+
+-- Load or initialize manager configuration and the custom module registry.
 function ModuleManager:loadConfig()
   -- Create cache directory if it doesn't exist
   if not io.exists(self.paths.cache) then
@@ -148,7 +214,7 @@ function ModuleManager:loadConfig()
       end
     end
   else
-    -- Create default config
+    -- No config yet: create defaults and persist them
     self.config = {
       auto_update = true,
       update_interval = 3600, -- 1 hour
@@ -174,7 +240,7 @@ function ModuleManager:loadConfig()
   end
 end
 
--- Save configuration
+-- Persist current configuration to disk (atomicity best-effort under Mudlet)
 function ModuleManager:saveConfig()
   local file = io.open(self.paths.config, "w")
   if file then
@@ -183,7 +249,7 @@ function ModuleManager:saveConfig()
   end
 end
 
--- Save custom modules
+-- Persist current custom module registry to disk
 function ModuleManager:saveCustomModules()
   local file = io.open(self.paths.custom, "w")
   if file then
@@ -192,20 +258,7 @@ function ModuleManager:saveCustomModules()
   end
 end
 
--- Get authorization headers for GitHub requests
-function ModuleManager:_getAuthHeaders()
-  local headers = {}
-  if self.config and self.config.github_token then
-    if self.config.github_token:match("^github_pat_") then
-      headers["Authorization"] = "Bearer " .. self.config.github_token
-    else
-      headers["Authorization"] = "token " .. self.config.github_token
-    end
-  end
-  return headers
-end
-
--- Get complete module list (default + custom + discovered)
+-- Materialize a combined view of modules from default registry, discovery cache, and custom overrides.
 function ModuleManager:getModuleList()
   local all_modules = {}
   
@@ -214,14 +267,17 @@ function ModuleManager:getModuleList()
     all_modules[id] = table.deepcopy(module)
   end
   
-  -- Add discovered modules from cache
+  -- Add remotely discovered modules from cache
   for id, module in pairs(self.discovery_cache.modules) do
-    if not all_modules[id] then -- Don't override custom modules
-      all_modules[id] = table.deepcopy(module)
-    end
+    all_modules[id] = table.deepcopy(module)
   end
   
-  -- Add/override with custom modules
+  -- Add locally discovered modules, allowing them to override remote modules
+  for id, module in pairs(self.local_modules_cache) do
+    all_modules[id] = table.deepcopy(module)
+  end
+
+  -- Add/override with custom modules (user-defined take precedence over all)
   for id, module in pairs(self.custom_modules) do
     all_modules[id] = table.deepcopy(module)
   end
@@ -229,68 +285,27 @@ function ModuleManager:getModuleList()
   return all_modules
 end
 
--- Register a loaded module
+-- Called by modules on successful load to expose their table and metadata.
 function ModuleManager:register(module_id, module_table)
   self.modules[module_id] = module_table
   cecho(string.format("<LightSteelBlue>[EMERGE] Registered: %s v%s<reset>\n", 
     module_id, module_table.version or "unknown"))
 end
 
--- Register a module (API alias for compatibility)
-function ModuleManager:registerModule(module_id, module_obj)
-  if not module_id then
-    cecho("<IndianRed>[EMERGE] Error: registerModule requires module_id<reset>\n")
-    return false
-  end
-  
-  if not module_obj or type(module_obj) ~= "table" then
-    cecho("<IndianRed>[EMERGE] Error: registerModule requires a table, but got " .. type(module_obj) .. "<reset>\n")
-    return false
-  end
-  
-  -- Check if module is already registered
-  if self.modules[module_id] then
-    cecho(string.format("<yellow>[EMERGE] Warning: Overwriting existing module: %s<reset>\n", module_id))
-  end
-  
-  -- Store the actual module object (not just boolean)
-  self.modules[module_id] = module_obj
-  
-  -- Debug output
-  local version = "unknown"
-  if type(module_obj) == "table" and module_obj.version then
-    version = tostring(module_obj.version)
-  end
-  
-  cecho(string.format("<LightSteelBlue>[EMERGE] Registered module: %s v%s<reset>\n", 
-    module_id, version))
-  
-  -- Emit event for system integration (if event system is available)
-  if achaea and achaea.events then
-    achaea.events:emit("module.installed", module_id)
-  end
-  
-  return true
-end
-
--- Compatibility alias for emerge-core and other legacy modules
-function ModuleManager:register(module_id, module_obj)
-  return self:registerModule(module_id, module_obj)
-end
-
--- Unregister a module
+-- Remove a module from the in-memory registry (does not affect config)
 function ModuleManager:unregister(module_id)
   self.modules[module_id] = nil
 end
 
--- Add custom module
+-- Add or update a user-defined module entry and persist it.
 function ModuleManager:addModule(module_id, module_info)
   self.custom_modules[module_id] = module_info
   self:saveCustomModules()
   cecho(string.format("<LightSteelBlue>[EMERGE] Added custom module: %s<reset>\n", module_id))
 end
 
--- Add module from GitHub URL
+-- Convenience: infer module metadata from a GitHub URL or owner/repo string.
+-- Attempts to find a plausible Lua entry file by probing common names.
 function ModuleManager:addGitHub(github_url)
   if not github_url or github_url == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule github <owner/repo or github.com/owner/repo><reset>\n")
@@ -346,9 +361,12 @@ function ModuleManager:addGitHub(github_url)
     local check_url = string.format("https://api.github.com/repos/%s/%s/contents/%s",
       owner, repo, file)
     
-    -- Use GitHub API to check if file exists
-    local headers = self:_getAuthHeaders()
-    headers["Accept"] = "application/vnd.github.v3.raw"
+    -- Use GitHub API to check if file exists (contents API)
+    local headers = {}
+    if self.config.github_token then
+      headers["Authorization"] = "token " .. self.config.github_token
+      headers["Accept"] = "application/vnd.github.v3.raw"
+    end
     
     downloadFile(self.paths.cache .. "github-check.json", check_url, headers)
     
@@ -361,7 +379,7 @@ function ModuleManager:addGitHub(github_url)
           
           -- Check if we got a valid response
           if content:find('"name"') and content:find('"download_url"') then
-            -- File exists! Add the module
+            -- File exists! Add the module to custom registry with inferred metadata
             local module_info = {
               name = repo:gsub("%-", " "):gsub("^%l", string.upper),
               description = string.format("Module from %s/%s", owner, repo),
@@ -383,7 +401,7 @@ function ModuleManager:addGitHub(github_url)
             
             os.remove(filename)
           else
-            -- Try next file
+            -- Not found in this name: try next candidate filename shortly
             file_index = file_index + 1
             tempTimer(0.1, try_next_file)
           end
@@ -396,7 +414,7 @@ function ModuleManager:addGitHub(github_url)
   try_next_file()
 end
 
--- Remove custom module
+-- Remove a user-added module from the registry and delete any cached file.
 function ModuleManager:removeModule(module_id)
   if not module_id or module_id == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule remove <module_id><reset>\n")
@@ -414,7 +432,7 @@ function ModuleManager:removeModule(module_id)
     return
   end
   
-  -- Unload if currently loaded
+  -- Unload if currently loaded to release any handlers/aliases
   if self.modules[module_id] then
     self:unloadModule(module_id)
   end
@@ -432,7 +450,7 @@ function ModuleManager:removeModule(module_id)
   cecho(string.format("<DarkOrange>[EMERGE] Removed module: %s<reset>\n", module_id))
 end
 
--- Enable/disable a module
+-- Toggle a module's enabled flag (controls visibility and auto-loading). Does not immediately load.
 function ModuleManager:toggleModule(module_id, enabled)
   if not module_id or module_id == "" then
     local cmd = enabled and "enable" or "disable"
@@ -464,297 +482,162 @@ function ModuleManager:toggleModule(module_id, enabled)
   cecho(string.format("<LightSteelBlue>[EMERGE] Module '%s' %s<reset>\n", 
     module_id, enabled and "enabled" or "disabled"))
   
-  -- If disabling and currently loaded, unload it
+  -- If disabling and currently loaded, unload it now
   if not enabled and self.modules[module_id] then
     self:unloadModule(module_id)
   end
 end
 
--- Load all required modules
-function ModuleManager:loadRequiredModules()
-  cecho("<DarkOrange>[EMERGE] Loading all required modules...<reset>\n")
-  
-  local all_modules = self:getModuleList()
-  local required_modules = {}
-  
-  -- Find all required modules
-  for id, info in pairs(all_modules) do
-    -- Skip if already loaded or is the manager itself
-    if not self.modules[id] and id ~= "emerge-manager" then
-      local is_required = false
-      if info.type == "required" or info.type == "core" or info.category == "required" then
-        is_required = true
-      elseif id:match("^emerge%-core") or id:match("^core%-") then
-        is_required = true
-      end
-      
-      if is_required then
-        table.insert(required_modules, {id = id, info = info, order = info.load_order or 50})
-      end
+-- Helper to execute a module's file and verify it registers correctly.
+function ModuleManager:_executeAndRegisterModule(module_id, file_path, callback)
+  local ok, err = loadfile(file_path)
+  if ok then
+    -- Check for correct registration after execution
+    local pre_execution_module_state = self.modules[module_id]
+    ok, err = pcall(ok)
+    if not ok then
+      cecho(string.format("<IndianRed>[EMERGE] Failed to execute %s: %s<reset>\n", module_id, err))
+      if callback then callback(false) end
+    elseif type(self.modules[module_id]) ~= "table" or self.modules[module_id] == pre_execution_module_state then
+      cecho(string.format("<IndianRed>[EMERGE] Module '%s' loaded but failed to register correctly.<reset>\n", module_id))
+      cecho("<DimGrey>Ensure the module calls EMERGE:register(module_id, module_table).<reset>\n")
+      -- Revert any partial registration
+      self.modules[module_id] = pre_execution_module_state
+      if callback then callback(false) end
+    else
+      -- Lifecycle: load
+      pcall(function() raiseEvent("module.lifecycle.load", { id = module_id }) end)
+      -- Lifecycle: postload (deferred for stability)
+      tempTimer(0.2, function()
+        pcall(function() raiseEvent("module.lifecycle.postload", { id = module_id }) end)
+      end)
+      if callback then callback(true) end
     end
-  end
-  
-  -- Sort by load order
-  table.sort(required_modules, function(a, b) return a.order < b.order end)
-  
-  if #required_modules == 0 then
-    cecho("<LightSteelBlue>[EMERGE] All required modules are already loaded<reset>\n")
-    return
-  end
-  
-  cecho(string.format("<LightSteelBlue>[EMERGE] Found %d required modules to load<reset>\n", #required_modules))
-  
-  -- Load each module with a small delay
-  for i, module in ipairs(required_modules) do
-    tempTimer(i * 0.5, function()
-      cecho(string.format("<DimGrey>[%d/%d] Loading %s...<reset>\n", i, #required_modules, module.id))
-      self:loadModule(module.id)
-    end)
+  else
+    cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s: %s<reset>\n", module_id, err))
+    if callback then callback(false) end
   end
 end
 
--- Load a module from GitHub
-function ModuleManager:loadModule(module_id, custom_branch)
+-- Download a module's Lua file and execute it. Module is expected to call EMERGE:register.
+function ModuleManager:loadModule(module_id, callback)
   if not module_id or module_id == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule load <module_id><reset>\n")
-    cecho("<DimGrey>Or: emodule load <branch> <module_id><reset>\n")
+    if callback then callback(false) end
     return
   end
   
-  if self.modules[module_id] and not self.pending_overwrite then
-    if self.overwrite_in_progress then
-      table.insert(self.overwrite_queue, {module_id = module_id, custom_branch = custom_branch})
-      cecho(string.format("<yellow>[EMERGE] Another overwrite is in progress. Queuing '%s'.<reset>\n", module_id))
-      return
-    end
-
-    cecho(string.format("<yellow>[EMERGE] Module '%s' is already loaded. Overwrite? (yes/no)<reset>\n", module_id))
-
-    self.overwrite_in_progress = true
-    self.pending_overwrite = { module_id = module_id, custom_branch = custom_branch }
-
-    local confirm_alias = "emerge_overwrite_confirm"
-    local cancel_alias = "emerge_overwrite_cancel"
-
-    if self.aliases[confirm_alias] then killAlias(self.aliases[confirm_alias]) end
-    if self.aliases[cancel_alias] then killAlias(self.aliases[cancel_alias]) end
-
-    self.aliases[confirm_alias] = tempAlias("^(yes)$", [[
-      local pending = EMERGE.pending_overwrite
-      if pending then
-        cecho(string.format("<LightSteelBlue>[EMERGE] Overwriting module '%s'...<reset>\n", pending.module_id))
-        EMERGE:_executeLoadModule(pending.module_id, pending.custom_branch)
-        EMERGE.pending_overwrite = nil
-      end
-      killAlias(EMERGE.aliases.emerge_overwrite_confirm)
-      killAlias(EMERGE.aliases.emerge_overwrite_cancel)
-      EMERGE.aliases.emerge_overwrite_confirm = nil
-      EMERGE.aliases.emerge_overwrite_cancel = nil
-      EMERGE.overwrite_in_progress = false
-      EMERGE:_processOverwriteQueue()
-    ]])
-
-    self.aliases[cancel_alias] = tempAlias("^(.*)$", [[
-      if matches[2] ~= "yes" then
-        local pending = EMERGE.pending_overwrite
-        if pending then
-          cecho(string.format("<IndianRed>[EMERGE] Aborted overwriting module '%s'.<reset>\n", pending.module_id))
-          EMERGE.pending_overwrite = nil
-        end
-        killAlias(EMERGE.aliases.emerge_overwrite_confirm)
-        killAlias(EMERGE.aliases.emerge_overwrite_cancel)
-        EMERGE.aliases.emerge_overwrite_confirm = nil
-        EMERGE.aliases.emerge_overwrite_cancel = nil
-        EMERGE.overwrite_in_progress = false
-        EMERGE:_processOverwriteQueue()
-      end
-    ]])
-
-    return
-  end
-
-  self:_executeLoadModule(module_id, custom_branch)
-end
-
-function ModuleManager:_executeLoadModule(module_id, custom_branch, on_complete, has_refreshed)
   local module_info = self:getModuleList()[module_id]
   if not module_info then
-    -- If we've already refreshed and the module is still not found, give up.
-    if has_refreshed then
-      cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s (even after refresh)<reset>\n", module_id))
-      if on_complete then on_complete(false) end
+    cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
+    cecho("<DimGrey>Try 'emodule list' to see available modules<reset>\n")
+    cecho("<DimGrey>Or 'emodule refresh' to update module list<reset>\n")
+    if callback then callback(false) end
+    return
+  end
+  
+  -- Lifecycle: preload
+  pcall(function() raiseEvent("module.lifecycle.preload", { id = module_id }) end)
+
+  -- Handle local modules
+  if module_info.is_local then
+    cecho(string.format("<DarkOrange>[EMERGE] Loading local module: %s...<reset>\n", module_id))
+    local main_file_path = module_info.local_path .. "/" .. module_info.files.main
+
+    if not io.exists(main_file_path) then
+      cecho(string.format("<IndianRed>[EMERGE] Main file not found for local module '%s' at: %s<reset>\n", module_id, main_file_path))
+      if callback then callback(false) end
       return
     end
 
-    cecho(string.format("<yellow>[EMERGE] Unknown module '%s'. Refreshing cache...<reset>\n", module_id))
-    self:refreshCache(true, function()
-      cecho(string.format("<LightSteelBlue>[EMERGE] Cache refreshed. Retrying load for '%s'...<reset>\n", module_id))
-      -- Retry loading, and pass 'true' for has_refreshed to prevent infinite loops.
-      self:_executeLoadModule(module_id, custom_branch, on_complete, true)
-    end)
-    return
-  end
-  
-  -- Create a list of dependencies that are not yet loaded
-  local dependencies_to_load = {}
-  if module_info.dependencies and type(module_info.dependencies) == "table" then
-    for _, dependency in ipairs(module_info.dependencies) do
-      if not self.modules[dependency] then
-        table.insert(dependencies_to_load, dependency)
-      end
-    end
+    self:_executeAndRegisterModule(module_id, main_file_path, callback)
+    return -- End execution for local module
   end
 
-  -- If there are dependencies to load, load them first in a chain
-  if #dependencies_to_load > 0 then
-    self:_loadDependencyChain(dependencies_to_load, custom_branch, function(success)
-      if success then
-        -- Dependencies loaded successfully, now proceed to load the main module
-        if self.config.debug then
-          cecho(string.format("<green>[DEBUG] Dependencies for %s are loaded. Proceeding...<reset>\n", module_id))
-        end
-        self:_downloadAndLoad(module_id, custom_branch, module_info, on_complete)
-      else
-        -- A dependency failed to load
-        cecho(string.format("<IndianRed>[EMERGE] Aborting load of %s due to a dependency failure.<reset>\n", module_id))
-        if on_complete then on_complete(false) end
-      end
-    end)
-  else
-    -- No dependencies to load, just load the module itself
-    self:_downloadAndLoad(module_id, custom_branch, module_info, on_complete)
-  end
-end
-
-function ModuleManager:_loadDependencyChain(deps_list, custom_branch, on_chain_complete)
-  -- Get the next dependency from the list
-  local dep_id = table.remove(deps_list, 1)
-
-  if not dep_id then
-    -- No more dependencies, the chain is complete
-    on_chain_complete(true)
-    return
-  end
-  
-  cecho(string.format("<DarkOrange>[EMERGE] Loading dependency: %s<reset>\n", dep_id))
-
-  -- Load the module, and for the callback, we recursively call this function
-  -- to continue with the rest of the dependency list.
-  self:_executeLoadModule(dep_id, custom_branch, function(success)
-    if success then
-      -- Current dependency loaded, move to the next one
-      self:_loadDependencyChain(deps_list, custom_branch, on_chain_complete)
-    else
-      -- A dependency failed, so the entire chain fails
-      cecho(string.format("<IndianRed>[EMERGE] Failed to load dependency: %s<reset>\n", dep_id))
-      on_chain_complete(false)
-    end
-  end)
-end
-
-function ModuleManager:_downloadAndLoad(module_id, custom_branch, module_info, on_complete)
   if not module_info.github then
     cecho(string.format("<IndianRed>[EMERGE] No GitHub info for module: %s<reset>\n", module_id))
-    if self.config.debug then cecho("<DimGrey>[DEBUG] Module info:<reset>\n"); display(module_info) end
-    if on_complete then on_complete(false) end
+    if callback then callback(false) end
     return
   end
-
-  if not module_info.manifest_path and not module_info.github.file then
-    cecho(string.format("<IndianRed>[EMERGE] No file path for module: %s<reset>\n", module_id))
-    if self.config.debug then cecho("<DimGrey>[DEBUG] Missing manifest_path or github.file<reset>\n"); display(module_info) end
-    if on_complete then on_complete(false) end
-    return
+  
+  -- Build URL based on manifest path or fallback to old method
+  local url
+  if module_info.manifest_path then
+    -- Use manifest path for more precise downloads
+    url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
+      module_info.github.owner,
+      module_info.github.repo,
+      module_info.github.branch or "main",
+      module_info.manifest_path)
+  else
+    -- Fallback to original method
+    url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
+      module_info.github.owner,
+      module_info.github.repo,
+      module_info.github.branch or "main",
+      module_info.github.file)
   end
-
-  local branch = custom_branch or module_info.github.branch or "main"
-  if custom_branch then
-    cecho(string.format("<yellow>[EMERGE] Using branch: %s<reset>\n", custom_branch))
-  end
-
-  local file_path = module_info.manifest_path or module_info.path or module_info.github.file
-  local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
-    module_info.github.owner, module_info.github.repo, branch, file_path)
-
-  if self.config.debug then cecho(string.format("<DimGrey>[DEBUG] Download URL: %s<reset>\n", url)) end
+  
   cecho(string.format("<DarkOrange>[EMERGE] Downloading %s...<reset>\n", module_id))
-
-  local headers = self:_getAuthHeaders()
-
-  -- Kill old handlers to prevent multiple triggers
-  if self.handlers["download_success_" .. module_id] then killAnonymousEventHandler(self.handlers["download_success_" .. module_id]) end
-  if self.handlers["download_error_" .. module_id] then killAnonymousEventHandler(self.handlers["download_error_" .. module_id]) end
-
-  self.handlers["download_success_" .. module_id] = registerAnonymousEventHandler("sysGetHttpDone", function(_, responseUrl, responseBody)
-    if responseUrl == url then
-      killAnonymousEventHandler(self.handlers["download_success_" .. module_id])
-      if self.handlers["download_error_" .. module_id] then killAnonymousEventHandler(self.handlers["download_error_" .. module_id]) end
+  
+  -- Add headers for private repos if token is available
+  local headers = {}
+  if self.config.github_token then
+    headers["Authorization"] = "token " .. self.config.github_token
+  end
+  
+  local cache_file = self.paths.cache .. module_id .. ".lua"
+  downloadFile(cache_file, url, headers)
+  
+  -- Kill any existing handlers for THIS module_id to prevent duplicates if called twice
+  if self.handlers.downloads[module_id] then
+    killAnonymousEventHandler(self.handlers.downloads[module_id])
+    self.handlers.downloads[module_id] = nil
+  end
+  if self.handlers.downloads[module_id .. "_error"] then
+    killAnonymousEventHandler(self.handlers.downloads[module_id .. "_error"])
+    self.handlers.downloads[module_id .. "_error"] = nil
+  end
+  
+  -- Create a new handler for this specific module
+  self.handlers.downloads[module_id] = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
+    if filename:find(module_id .. "%.lua$") then
+      -- Clean up the error handler for this download
+      if self.handlers.downloads[module_id .. "_error"] then
+        killAnonymousEventHandler(self.handlers.downloads[module_id .. "_error"])
+        self.handlers.downloads[module_id .. "_error"] = nil
+      end
 
       cecho(string.format("<LightSteelBlue>[EMERGE] Downloaded %s<reset>\n", module_id))
-      local cache_file = self.paths.cache .. module_id .. ".lua"
-      local file = io.open(cache_file, "w")
-      if file then
-        file:write(responseBody)
-        file:close()
-        
-        if not io.exists(cache_file) then
-          cecho(string.format("<IndianRed>[EMERGE] Failed to save %s - file not found after write<reset>\n", module_id))
-          if on_complete then on_complete(false) end
-          return
-        end
+      
+      self:_executeAndRegisterModule(module_id, filename, callback)
 
-        cecho(string.format("<DarkOrange>[EMERGE] Loading %s...<reset>\n", module_id))
-        local ok, err = loadfile(cache_file)
-        if ok then
-          ok, err = pcall(ok)
-          if ok then
-            if self.modules[module_id] and type(self.modules[module_id]) == "table" then
-              if on_complete then on_complete(true) end
-            else
-              cecho(string.format("<IndianRed>[EMERGE] Load failed: Module script for '%s' executed but did not register itself.<reset>\n", module_id))
-              cecho(string.format("<DimGrey>Please ensure the module file calls EMERGE:registerModule(module_id, module_table).<reset>\n"))
-              self.modules[module_id] = nil
-              if on_complete then on_complete(false) end
-            end
-          else
-            cecho(string.format("<IndianRed>[EMERGE] Failed to execute %s<reset>\n", module_id))
-            cecho(string.format("<DimGrey>Error: %s<reset>\n", tostring(err)))
-            if on_complete then on_complete(false) end
-          end
-        else
-          cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s<reset>\n", module_id))
-          cecho(string.format("<DimGrey>Parse error: %s<reset>\n", tostring(err)))
-          if on_complete then on_complete(false) end
-        end
-      else
-        cecho(string.format("<IndianRed>[EMERGE] Failed to open cache file for writing<reset>\n"))
-        if on_complete then on_complete(false) end
+      -- We're done, so kill this specific handler
+      killAnonymousEventHandler(self.handlers.downloads[module_id])
+      self.handlers.downloads[module_id] = nil
+    end
+  end)
+
+  self.handlers.downloads[module_id .. "_error"] = registerAnonymousEventHandler("sysDownloadError", function(_, filename, errorMsg)
+    if filename:find(module_id .. "%.lua$") then
+      -- Clean up the success handler
+      if self.handlers.downloads[module_id] then
+        killAnonymousEventHandler(self.handlers.downloads[module_id])
+        self.handlers.downloads[module_id] = nil
       end
+
+      cecho(string.format("<IndianRed>[EMERGE] Failed to download %s: %s<reset>\n", module_id, errorMsg or "Unknown error"))
+
+      -- We're done, so kill this specific handler
+      killAnonymousEventHandler(self.handlers.downloads[module_id .. "_error"])
+      self.handlers.downloads[module_id .. "_error"] = nil
+
+      if callback then callback(false) end
     end
   end)
-
-  self.handlers["download_error_" .. module_id] = registerAnonymousEventHandler("sysGetHttpError", function(_, responseUrl, errorMsg)
-    if responseUrl == url then
-      killAnonymousEventHandler(self.handlers["download_success_" .. module_id])
-      killAnonymousEventHandler(self.handlers["download_error_" .. module_id])
-      cecho(string.format("<IndianRed>[EMERGE] Failed to download %s: %s<reset>\n", module_id, errorMsg or "unknown error"))
-      if on_complete then on_complete(false) end
-    end
-  end)
-
-  getHTTP(url, headers)
 end
 
-function ModuleManager:_processOverwriteQueue()
-  if #self.overwrite_queue > 0 then
-    local next_load = table.remove(self.overwrite_queue, 1)
-    tempTimer(0.5, function()
-      EMERGE:loadModule(next_load.module_id, next_load.custom_branch)
-    end)
-  end
-end
-
--- Unload a module  
+-- Unload a module by ID. Special-case: "manager"/"emerge" unloads the manager itself.
 function ModuleManager:unloadModule(module_id, confirm)
   if not module_id or module_id == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule unload <module_id><reset>\n")
@@ -774,7 +657,7 @@ function ModuleManager:unloadModule(module_id, confirm)
     
     cecho("<DarkOrange>[EMERGE] Unloading module manager...<reset>\n")
     
-    -- Remove persistent loader and group
+    -- Remove persistent loader and group (Script Editor artifacts)
     if exists("EMERGE Module Bootloader", "script") then
       disableScript("EMERGE Module Bootloader")
       killScript("EMERGE Module Bootloader")
@@ -791,7 +674,7 @@ function ModuleManager:unloadModule(module_id, confirm)
     saveProfile()
     cecho("<DarkOrange>[EMERGE] Profile saved - removal is permanent<reset>\n")
     
-    -- Remove saved manager file
+    -- Remove saved manager file from Mudlet home dir
     local manager_file = getMudletHomeDir() .. "/emerge-manager.lua"
     if io.exists(manager_file) then
       os.remove(manager_file)
@@ -805,7 +688,7 @@ function ModuleManager:unloadModule(module_id, confirm)
       cecho("<DarkOrange>[EMERGE] Removed download file<reset>\n")
     end
     
-    -- Unload self
+    -- Unload self and clear global references to avoid stale state
     tempTimer(0.5, function()
       if EMERGE and EMERGE.unload then
         EMERGE:unload()
@@ -819,59 +702,116 @@ function ModuleManager:unloadModule(module_id, confirm)
   
   local module = self.modules[module_id]
   if module then
+    -- Lifecycle: preunload
+    pcall(function()
+      raiseEvent("module.lifecycle.preunload", { id = module_id })
+    end)
     if module.unload then
       module:unload()
     end
     self.modules[module_id] = nil
     cecho(string.format("<DarkOrange>[EMERGE] Unloaded: %s<reset>\n", module_id))
+    -- Lifecycle: unload
+    pcall(function()
+      raiseEvent("module.lifecycle.unload", { id = module_id })
+    end)
   else
     cecho(string.format("<IndianRed>[EMERGE] Module not loaded: %s<reset>\n", module_id))
   end
 end
 
--- Check all modules for updates (with proper async coordination)
+function ModuleManager:testModule(module_id)
+  cecho(string.format("<LightSteelBlue>[EMERGE] Running tests for: %s<reset>\n", module_id))
+
+  -- 1. Ensure test harness is loaded
+  if not self.modules["emerge-testing"] then
+    cecho("<DimGrey>Test harness not loaded, loading it now...<reset>\n")
+    self:loadModule("emerge-testing")
+    -- Need to wait for async load to complete
+    tempTimer(1, function() self:testModule(module_id) end)
+    return
+  end
+
+  local harness = self.modules["emerge-testing"]
+  harness:reset_results()
+
+  -- 2. Get module info
+  local module_info = self:getModuleList()[module_id]
+  if not module_info then
+    cecho(string.format("<IndianRed>Module '%s' not found.<reset>\n", module_id))
+    return
+  end
+
+  -- 3. Get test file path
+  if not module_info.files or not module_info.files.tests then
+    cecho(string.format("<yellow>No tests specified in manifest for module '%s'.<reset>\n", module_id))
+    return
+  end
+
+  local test_file_path
+  if module_info.is_local then
+    test_file_path = module_info.local_path .. "/" .. module_info.files.tests
+  else
+    -- For non-local modules, we assume tests are in the cache
+    cecho("<yellow>Testing non-local modules is not currently supported.<reset>\n")
+    return
+  end
+
+  if io.exists(test_file_path) then
+    -- 4. Load and run the test file
+    local ok, err = loadfile(test_file_path)
+    if ok then
+      local success, err_pcall = pcall(ok)
+      if not success then
+        cecho(string.format("<IndianRed>Error running test file for %s: %s<reset>\n", module_id, tostring(err_pcall)))
+      end
+    else
+      cecho(string.format("<IndianRed>Error loading test file for %s: %s<reset>\n", module_id, tostring(err)))
+    end
+  else
+    cecho(string.format("<IndianRed>Test file not found for local module '%s' at: %s<reset>\n", module_id, test_file_path))
+  end
+
+  -- 5. Finish run
+  harness:finish_run()
+end
+
+-- Refresh discovery cache, check the manager and all loaded modules for available updates.
 function ModuleManager:checkAllUpdates()
-  cecho("<DarkOrange>[EMERGE] Checking manager and all modules for updates...<reset>\n")
+  cecho("<DarkOrange>[EMERGE] Checking all modules for updates...<reset>\n")
   
-  -- Store original silent mode
-  local was_silent = self.silent_check
-  self.silent_check = true
+  -- Refresh cache to get latest versions
+  self:refreshCache(false)
   
-  -- Track completion state
-  local completion_state = {
-    manager_check_done = false,
-    cache_refresh_done = false,
-    timeout_reached = false
-  }
+  -- Check self first
+  self:checkSelfUpdate()
   
-  -- Reset pending update state
-  self.pending_update = nil
-  
-  -- Force fresh cache for update checks (no stale data)
-  cecho("<DimGrey>[EMERGE] Refreshing module cache...<reset>\n")
-  self:refreshCache(true)
-  completion_state.cache_refresh_done = true
-  
-  -- Check manager version with async coordination
-  cecho("<DimGrey>[EMERGE] Checking manager version...<reset>\n")
-  self:checkSelfUpdateAsync(function(update_available)
-    completion_state.manager_check_done = true
-    self:_evaluateUpdateResults(completion_state, was_silent)
-  end)
-  
-  -- Timeout protection (fallback after 10 seconds)
-  tempTimer(10, function()
-    if not completion_state.manager_check_done then
-      cecho("<yellow>[EMERGE] Manager check timed out - network issues?<reset>\n")
-      completion_state.manager_check_done = true
-      completion_state.timeout_reached = true
-      self:_evaluateUpdateResults(completion_state, was_silent)
+  -- Check for module updates using discovery cache
+  tempTimer(2, function() -- Wait for cache refresh
+    local updates = self:checkForUpdates()
+    
+    if #updates > 0 then
+      cecho(string.format("\n<yellow>[EMERGE] %d module update(s) available:<reset>\n", #updates))
+      for _, update in ipairs(updates) do
+        cecho(string.format("  <SteelBlue>%s<reset>: v%s → v%s (%s)\n",
+          update.id, update.current, update.available, update.repository))
+      end
+      cecho("\n<DimGrey>Use 'emodule load <module>' to update individual modules<reset>\n")
+    else
+      cecho("<LightSteelBlue>[EMERGE] All modules are up to date<reset>\n")
+    end
+    
+    -- Give each module a chance to perform its own update check if it exposes one
+    for id, module in pairs(self.modules) do
+      if module.checkForUpdates then
+        module:checkForUpdates(true)
+      end
     end
   end)
 end
 
--- Async version of checkSelfUpdate that uses callbacks
-function ModuleManager:checkSelfUpdateAsync(callback)
+-- Download the manager from GitHub and compare version strings. Non-destructive.
+function ModuleManager:checkSelfUpdate()
   local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
     self.github.owner,
     self.github.repo,
@@ -879,219 +819,42 @@ function ModuleManager:checkSelfUpdateAsync(callback)
     self.github.files.manager)
   
   -- Add headers for private repos if token is available
-  local headers = self:_getAuthHeaders()
+  local headers = {}
+  if self.config.github_token then
+    headers["Authorization"] = "token " .. self.config.github_token
+  end
   
-  -- Generate unique filename to avoid conflicts
-  local check_file = self.paths.cache .. "module-manager-check-" .. os.time() .. ".lua"
+  downloadFile(self.paths.cache .. "module-manager-check.lua", url, headers)
   
-  -- Download with event handler
-  downloadFile(check_file, url, headers)
-  
-  -- Set up one-time event handler for this specific download
-  local downloadHandler
-  downloadHandler = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
-    if filename == check_file then
-      -- Clean up this handler
-      killAnonymousEventHandler(downloadHandler)
-      
+  registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
+    if filename:find("module-manager-check%.lua$") then
       local file = io.open(filename, "r")
       if file then
         local content = file:read("*all")
         file:close()
         
-        -- Clean up temp file
-        os.remove(filename)
-        
         local remote_version = content:match('local CURRENT_VERSION = "([^"]+)"')
         if remote_version and remote_version ~= self.version then
-          if not self.silent_check then
-            cecho(string.format("<DarkOrange>[EMERGE] Manager update available: v%s -> v%s<reset>\n",
-              self.version, remote_version))
-          end
+          cecho(string.format("<DarkOrange>[EMERGE] Update available: v%s -> v%s<reset>\n",
+            self.version, remote_version))
+          cecho("<SteelBlue>Run 'module upgrade manager' to update<reset>\n")
           
           self.pending_update = {
             version = remote_version,
             content = content
           }
-          callback(true)
-        else
-          if not self.silent_check and remote_version == self.version then
-            cecho("<DimGrey>[EMERGE] Manager is up to date<reset>\n")
+        elseif remote_version == self.version then
+          if not self.silent_check then
+            cecho("<LightSteelBlue>[EMERGE] You have the latest version<reset>\n")
           end
-          callback(false)
         end
-      else
-        cecho("<yellow>[EMERGE] Failed to check manager version<reset>\n")
-        callback(false)
       end
     end
-  end)
-  
-  -- Timeout protection for individual download
-  tempTimer(8, function()
-    if downloadHandler then
-      killAnonymousEventHandler(downloadHandler)
-      cecho("<yellow>[EMERGE] Manager version check timed out<reset>\n")
-      callback(false)
-    end
-  end)
+  end, true) -- one-time handler
 end
 
--- Evaluate results once async operations complete
-function ModuleManager:_evaluateUpdateResults(completion_state, was_silent)
-  -- Only proceed if all operations are done
-  if not (completion_state.manager_check_done and completion_state.cache_refresh_done) then
-    return
-  end
-  
-  cecho("<DimGrey>[EMERGE] Checking module versions...<reset>\n")
-  local updates = self:checkForUpdates()
-  
-  local total_updates = #updates
-  if self.pending_update then
-    total_updates = total_updates + 1
-  end
-  
-  if total_updates > 0 then
-    cecho(string.format("\n<yellow>[EMERGE] %d update(s) available:<reset>\n", total_updates))
-    
-    -- Show manager update if available
-    if self.pending_update then
-      cecho(string.format("  <SteelBlue>emerge-manager<reset>: v%s → v%s\n",
-        self.version, self.pending_update.version))
-    end
-    
-    -- Show module updates
-    for _, update in ipairs(updates) do
-      cecho(string.format("  <SteelBlue>%s<reset>: v%s → v%s (%s)\n",
-        update.id, update.current, update.available, update.repository))
-    end
-    
-    cecho("\n<DimGrey>Commands:<reset>\n")
-    cecho("<DimGrey>  emodule upgrade manager  # Update the manager<reset>\n")
-    cecho("<DimGrey>  emodule upgrade <module> # Update a specific module<reset>\n")
-    cecho("<DimGrey>  emodule upgrade all      # Update everything<reset>\n")
-  else
-    cecho("<LightSteelBlue>[EMERGE] All components are up to date<reset>\n")
-  end
-  
-  -- Restore silent mode
-  self.silent_check = was_silent
-  
-  -- Check each loaded module for custom update methods
-  for id, module in pairs(self.modules) do
-    if module.checkForUpdates then
-      module:checkForUpdates(true)
-    end
-  end
-end
-
--- Check for ModuleManager updates (legacy synchronous version)
-function ModuleManager:checkSelfUpdate()
-  -- Delegate to the new async version for consistency
-  self:checkSelfUpdateAsync(function(update_available)
-    if update_available then
-      cecho("<SteelBlue>Run 'emodule upgrade manager' to update<reset>\n")
-    end
-  end)
-end
-
--- Upgrade modules or manager
-function ModuleManager:upgradeComponent(component, force)
-  if not component or component == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <manager|module|all><reset>\n")
-    return
-  end
-  
-  if component == "all" then
-    -- Upgrade everything
-    cecho("<DarkOrange>[EMERGE] Upgrading all components...<reset>\n")
-    
-    -- First upgrade manager if needed
-    if self.pending_update then
-      self:upgradeSelf(force)
-      tempTimer(2, function()
-        -- Then upgrade modules
-        self:upgradeAllModules()
-      end)
-    else
-      -- Just upgrade modules
-      self:upgradeAllModules()
-    end
-    
-  elseif component == "manager" then
-    self:upgradeSelf(force)
-    
-  else
-    -- Try to upgrade specific module
-    self:upgradeModule(component, force)
-  end
-end
-
--- Upgrade all modules that have updates
-function ModuleManager:upgradeAllModules()
-  local updates = self:checkForUpdates()
-  
-  if #updates == 0 then
-    cecho("<LightSteelBlue>[EMERGE] No module updates available<reset>\n")
-    return
-  end
-  
-  cecho(string.format("<DarkOrange>[EMERGE] Upgrading %d module(s)...<reset>\n", #updates))
-  
-  for i, update in ipairs(updates) do
-    tempTimer(i * 1, function()
-      cecho(string.format("<DimGrey>[%d/%d] Upgrading %s...<reset>\n", i, #updates, update.id))
-      self:loadModule(update.id) -- loadModule will download the latest version
-    end)
-  end
-end
-
--- Upgrade a specific module
-function ModuleManager:upgradeModule(module_id, force)
-  if not module_id or module_id == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <module><reset>\n")
-    return
-  end
-  
-  local all_modules = self:getModuleList()
-  local module_info = all_modules[module_id]
-  
-  if not module_info then
-    cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
-    return
-  end
-  
-  if not force then
-    -- Check if update is actually needed
-    local loaded_module = self.modules[module_id]
-    if loaded_module and loaded_module.version == module_info.version then
-      cecho(string.format("<LightSteelBlue>[EMERGE] %s is already up to date (v%s)<reset>\n", 
-        module_id, module_info.version))
-      return
-    end
-  end
-  
-  cecho(string.format("<DarkOrange>[EMERGE] Upgrading %s to v%s...<reset>\n", 
-    module_id, module_info.version))
-  
-  -- Use loadModule to get the latest version
-  self:loadModule(module_id)
-end
-
--- Update ModuleManager
-function ModuleManager:upgradeSelf(force)
-  -- Skip version check if force is specified
-  if force then
-    cecho("<DarkOrange>[EMERGE] Force upgrade requested - downloading latest version...<reset>\n")
-    self.pending_update = {
-      version = "latest",
-      current = self.version
-    }
-    self:performUpgrade()
-    return
-  end
-  
+-- Entry point for manager upgrade. Checks if an update is available and applies it.
+function ModuleManager:upgradeSelf()
   -- Check for updates first if we don't have a pending update
   if not self.pending_update then
     cecho("<DimGrey>[EMERGE] Checking for updates...<reset>\n")
@@ -1105,7 +868,10 @@ function ModuleManager:upgradeSelf(force)
       os.time())
     
     -- Add headers for private repos if token is available
-    local headers = self:_getAuthHeaders()
+    local headers = {}
+    if self.config.github_token then
+      headers["Authorization"] = "token " .. self.config.github_token
+    end
     
     -- Ensure cache directory exists
     if not io.exists(self.paths.cache) then
@@ -1117,7 +883,7 @@ function ModuleManager:upgradeSelf(force)
     -- Store handlers to ensure they can be killed
     local downloadHandler, errorHandler, timeoutHandler
     
-    -- Set up timeout
+    -- Set up timeout so failed downloads don't hang
     timeoutHandler = tempTimer(10, function()
       cecho("<IndianRed>[EMERGE] Update check timed out. Please try again.<reset>\n")
       if downloadHandler then killAnonymousEventHandler(downloadHandler) end
@@ -1188,7 +954,7 @@ function ModuleManager:upgradeSelf(force)
       end
     end, true)
     
-    -- Initiate the download
+    -- Initiate the download of the remote manager for version inspection
     downloadFile(check_file, url, headers)
     
     return
@@ -1198,7 +964,7 @@ function ModuleManager:upgradeSelf(force)
   self:doUpgrade()
 end
 
--- Actually perform the upgrade
+-- Replace the currently loaded manager by executing the freshly downloaded script content.
 function ModuleManager:doUpgrade()
   if not self.pending_update then
     return
@@ -1213,7 +979,7 @@ function ModuleManager:doUpgrade()
     cecho(string.format("<DarkOrange>[EMERGE] Upgrading to v%s...<reset>\n", 
       self.pending_update.version))
     
-    -- Load the new version
+    -- Attempt to load and execute the new manager script
     local ok, err = loadfile(temp_file)
     if ok then
       ok, err = pcall(ok)
@@ -1228,196 +994,163 @@ function ModuleManager:doUpgrade()
   end
 end
 
--- Discover repositories and cache modules
-function ModuleManager:discoverRepositories(on_discovery_complete)
-  -- If a discovery is already in progress, queue the callback and return.
+-- Parallel-ish discovery across configured repositories by downloading each manifest.json.
+function ModuleManager:discoverRepositories(callback) -- Added callback for async handling
   if self.discovery_in_progress then
-    if self.config.debug then
-      cecho("<yellow>[DEBUG] Discovery process is already running. Queuing callback.<reset>\n")
-    end
-    if on_discovery_complete then
-      table.insert(self.discovery_callbacks, on_discovery_complete)
-    end
+    cecho("<yellow>[EMERGE] Discovery process is already running.<reset>\n")
+    -- Optionally, queue the callback or notify it. For now, we just drop it.
+    if callback then callback(false) end
     return
   end
-  self.discovery_in_progress = true
 
-  -- Add the current callback to the queue, so it's handled along with any others.
-  if on_discovery_complete then
-    table.insert(self.discovery_callbacks, on_discovery_complete)
+  local pending_downloads = #self.repositories
+  if pending_downloads == 0 then
+    cecho("<DimGrey>[EMERGE] No repositories to discover.<reset>\n")
+    if callback then callback(true) end
+    return
   end
 
-  local pending_downloads = 0
+  self.discovery_in_progress = true
+
   local completed_downloads = 0
   local discovered_modules = {}
-  local discovery_finished = false
 
-  local function finish_discovery()
-    if discovery_finished then return end
-    discovery_finished = true
+  cecho("<DarkOrange>[EMERGE] Discovering modules from repositories...<reset>\n")
+
+  local function finalize_discovery(timed_out)
+    -- Ensure this only runs once per discovery cycle
+    if not self.discovery_in_progress then return end
+    
+    if self.discovery_timeout_timer then
+      killTimer(self.discovery_timeout_timer)
+      self.discovery_timeout_timer = nil
+    end
 
     self.discovery_cache.modules = discovered_modules
     self.discovery_cache.last_refresh = os.time()
 
     local total_modules = table.size(discovered_modules)
-    if total_modules > 0 and not self.silent_check then
+    if not timed_out then
       cecho(string.format("<LightSteelBlue>[EMERGE] Discovery complete: %d modules available<reset>\n", total_modules))
     end
 
-    self.discovery_in_progress = false -- Release the lock
+    -- Reset the flag
+    self.discovery_in_progress = false
 
-    -- Execute all queued callbacks
-    local callbacks_to_run = self.discovery_callbacks
-    -- Clear the queue before running, in case a callback triggers a new discovery
-    self.discovery_callbacks = {}
-    for _, callback in ipairs(callbacks_to_run) do
-      pcall(callback) -- Use pcall for safety
-    end
+    -- Execute callback if provided
+    if callback then callback(true) end
   end
 
-  cecho("<DarkOrange>[EMERGE] Discovering modules from repositories...<reset>\n")
-  
   for _, repo_config in ipairs(self.repositories) do
-    if not (repo_config.requires_token and not self.config.github_token) then
-      pending_downloads = pending_downloads + 1
+    self:downloadManifest(repo_config, function(success, modules)
+      if success and modules then
+        for id, module_info in pairs(modules) do
+          module_info.repository = repo_config.name
+          module_info.github = module_info.github or {
+            owner = repo_config.owner,
+            repo = repo_config.repo,
+            branch = repo_config.branch
+          }
+          discovered_modules[id] = module_info
+        end
+        cecho(string.format("<DimGrey>[EMERGE] Found %d modules in %s<reset>\n", table.size(modules), repo_config.name))
+      else
+        cecho(string.format("<yellow>[EMERGE] Could not access %s repository<reset>\n", repo_config.name))
+      end
       
-      self:downloadManifest(repo_config, function(success, modules)
-        completed_downloads = completed_downloads + 1
-        
-        if success and modules then
-          for id, module_info in pairs(modules) do
-            module_info.repository = repo_config.name
-            module_info.github = module_info.github or {
-              owner = repo_config.owner, repo = repo_config.repo, branch = repo_config.branch
-            }
-            if module_info.path and not module_info.manifest_path then
-              module_info.manifest_path = module_info.path
-            end
-            discovered_modules[id] = module_info
-          end
-          cecho(string.format("<DimGrey>[EMERGE] Found %d modules in %s<reset>\n", table.size(modules), repo_config.name))
-        else
-          if repo_config.public or self.config.github_token then
-            cecho(string.format("<yellow>[EMERGE] Could not access %s repository<reset>\n", repo_config.name))
-          end
-        end
-        
-        if completed_downloads >= pending_downloads then
-          finish_discovery()
-        end
-      end)
-    end
-  end
-  
-  if pending_downloads > 0 then
-    tempTimer(10, function()
-      if not discovery_finished then
-        cecho("<yellow>[EMERGE] Some repositories timed out during discovery.<reset>\n")
-        finish_discovery()
+      completed_downloads = completed_downloads + 1
+      if completed_downloads >= pending_downloads then
+        finalize_discovery(false)
       end
     end)
-  else
-    -- No downloads were initiated, so we finish immediately.
-    if not self.config.github_token then
-      cecho("<DimGrey>[EMERGE] Set GitHub token to access private repositories<reset>\n")
-    end
-    finish_discovery()
   end
+  
+  -- Handle timeout
+  self.discovery_timeout_timer = tempTimer(15, function()
+    if completed_downloads < pending_downloads then
+      cecho("<yellow>[EMERGE] Some repositories timed out during discovery.<reset>\n")
+      finalize_discovery(true)
+    end
+  end)
 end
 
--- Download manifest from a repository using getHTTP
+-- Download a single repository's manifest.json and decode it.
+-- callback(success:boolean, modules:table|nil)
 function ModuleManager:downloadManifest(repo_config, callback)
-  local manifest_url = string.format("https://raw.githubusercontent.com/%s/%s/%s/manifest.json",
-    repo_config.owner, repo_config.repo, repo_config.branch)
+  -- Use manifest_path if provided, otherwise default to root manifest.json
+  local manifest_file = repo_config.manifest_path or "manifest.json"
+  local manifest_url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
+    repo_config.owner, repo_config.repo, repo_config.branch, manifest_file)
   
-  if self.config.debug then
-    cecho(string.format("<DimGrey>[DEBUG] Fetching: %s<reset>\n", manifest_url))
-  end
+  local cache_file = self.paths.cache .. "manifest-" .. repo_config.name .. ".json"
   
+  -- Headers for private repos
   local headers = {}
-  if not repo_config.public then
-    headers = self:_getAuthHeaders()
+  if not repo_config.public and self.config.github_token then
+    headers["Authorization"] = "token " .. self.config.github_token
   end
   
-  local success_handler, error_handler, timeout_handler
+  downloadFile(cache_file, manifest_url, headers)
   
-  success_handler = registerAnonymousEventHandler("sysGetHttpDone", function(_, responseUrl, responseBody, http_status)
-    if responseUrl == manifest_url then
-      killAnonymousEventHandler(success_handler)
-      if error_handler then killAnonymousEventHandler(error_handler) end
-      if timeout_handler then killTimer(timeout_handler) end
+  -- Set up completion handler for this specific file
+  local download_handler = registerAnonymousEventHandler("sysDownloadDone", function(_, filename)
+    if filename == cache_file then
+      killAnonymousEventHandler(download_handler)
       
-      http_status = tonumber(http_status)
-
-      if http_status == 200 then
-        local ok, manifest = pcall(yajl.to_value, responseBody)
+      local file = io.open(filename, "r")
+      if file then
+        local content = file:read("*all")
+        file:close()
+        
+        local ok, manifest = pcall(yajl.to_value, content)
         if ok and manifest and manifest.modules then
+          -- Cache the manifest
           self.discovery_cache.manifests[repo_config.name] = manifest
           callback(true, manifest.modules)
         else
-          cecho(string.format("<IndianRed>[EMERGE] Failed to parse manifest.json in %s: Invalid JSON format.<reset>\n", repo_config.name))
-          if self.config.debug then cecho(string.format("<DimGrey>[DEBUG] Response body: %s<reset>\n", responseBody)) end
           callback(false, nil)
         end
-      elseif http_status == 404 then
-        cecho(string.format("<yellow>[EMERGE] Failed to find manifest.json in %s. (Error 404)<reset>\n", repo_config.name))
-        callback(false, nil)
-      elseif http_status == 403 then
-        cecho(string.format("<IndianRed>[EMERGE] Access Denied to %s. Check token permissions. (Error 403)<reset>\n", repo_config.name))
-        callback(false, nil)
       else
-        if http_status > 0 then
-          cecho(string.format("<IndianRed>[EMERGE] Could not access repository %s. (HTTP Error %d)<reset>\n", repo_config.name, http_status))
-          if self.config.debug then cecho(string.format("<DimGrey>[DEBUG] Response body: %s<reset>\n", responseBody)) end
-        end
         callback(false, nil)
       end
+      
+      os.remove(filename)
     end
   end)
   
-  error_handler = registerAnonymousEventHandler("sysGetHttpError", function(_, responseUrl, errorMsg)
-    if responseUrl == manifest_url then
+  -- Set up error handler for this specific file
+  local error_handler = registerAnonymousEventHandler("sysDownloadError", function(_, filename)
+    if filename == cache_file then
+      killAnonymousEventHandler(download_handler)
       killAnonymousEventHandler(error_handler)
-      if success_handler then killAnonymousEventHandler(success_handler) end
-      if timeout_handler then killTimer(timeout_handler) end
-      
-      cecho(string.format("<red>[EMERGE] Network error fetching manifest for %s: %s<reset>\n", repo_config.name, errorMsg or "unknown"))
       callback(false, nil)
     end
   end)
-  
-  timeout_handler = tempTimer(5, function()
-    if success_handler then killAnonymousEventHandler(success_handler) end
-    if error_handler then killAnonymousEventHandler(error_handler) end
-    if self.config.debug then
-      cecho(string.format("<yellow>[DEBUG] Timeout fetching %s<reset>\n", repo_config.name))
-    end
-    callback(false, nil)
-  end)
-  
-  getHTTP(manifest_url, headers)
 end
 
--- Get cached modules
+-- Accessor for the flat list of discovered modules
 function ModuleManager:getCachedModules()
   return self.discovery_cache.modules
 end
 
--- Refresh discovery cache
-function ModuleManager:refreshCache(force, on_complete)
+-- If the cache is older than cache_duration, re-run discovery. Otherwise, just inform user.
+function ModuleManager:refreshCache(force, callback)
   local cache_age = os.time() - self.discovery_cache.last_refresh
   
   if force or cache_age > self.discovery_cache.cache_duration then
-    self:discoverRepositories(on_complete)
+    self:discoverLocalModules()
+    self:discoverRepositories(function(success)
+      if callback then callback(success) end
+    end)
   else
     local remaining = self.discovery_cache.cache_duration - cache_age
     cecho(string.format("<DimGrey>[EMERGE] Cache is fresh (expires in %d minutes)<reset>\n", 
       math.ceil(remaining / 60)))
-    if on_complete then on_complete() end
+    if callback then callback(true) end
   end
 end
 
--- Check for updates
+-- For each loaded module, compare its version with the discovered one and return a list of updates.
 function ModuleManager:checkForUpdates()
   local updates = {}
   
@@ -1440,7 +1173,7 @@ function ModuleManager:checkForUpdates()
   return updates
 end
 
--- Parse version string into comparable format
+-- Robust parser supporting "x.y.z" and "x.y" version formats.
 function ModuleManager:parseVersion(version_string)
   if not version_string then return {major = 0, minor = 0, patch = 0} end
   
@@ -1458,7 +1191,7 @@ function ModuleManager:parseVersion(version_string)
   }
 end
 
--- Compare two version strings
+-- Returns 1 (v1>v2), -1 (v1<v2), or 0 (equal)
 function ModuleManager:compareVersions(v1, v2)
   local version1 = self:parseVersion(v1)
   local version2 = self:parseVersion(v2)
@@ -1478,11 +1211,11 @@ function ModuleManager:compareVersions(v1, v2)
   return 0
 end
 
--- List configured repositories
+-- Pretty-print repositories and cache status for the user
 function ModuleManager:listRepositories()
-  cecho("\n<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
-  cecho("<LightSteelBlue>                                    Configured Repositories<reset>\n")
-  cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n\n")
+  cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
+  cecho("<LightSteelBlue>Configured Repositories<reset>\n")
+  cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
   
   for i, repo in ipairs(self.repositories) do
     local status_icon = repo.public and "<green>●<reset>" or "<yellow>●<reset>"
@@ -1504,7 +1237,7 @@ function ModuleManager:listRepositories()
   end
 end
 
--- Search available modules
+-- Full-text search across ID, name, description, author. Limits to top 10 results.
 function ModuleManager:searchModules(search_term)
   if not search_term or search_term == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule search <term><reset>\n")
@@ -1583,7 +1316,7 @@ function ModuleManager:searchModules(search_term)
   end
 end
 
--- Show detailed module information
+-- Print a detailed card for a discovered module, including loaded/available versions.
 function ModuleManager:showModuleInfo(module_id)
   if not module_id or module_id == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule info <module_id><reset>\n")
@@ -1658,13 +1391,13 @@ function ModuleManager:showModuleInfo(module_id)
   end
 end
 
--- Update module registry from GitHub (backward compatibility)
+-- Legacy alias to re-run discovery immediately
 function ModuleManager:updateRegistry()
   cecho("<DarkOrange>[EMERGE] Updating module registry...<reset>\n")
   self:refreshCache(true)
 end
 
--- Auto-load modules on startup
+-- After startup, automatically load any modules marked enabled+auto_load.
 function ModuleManager:autoLoadModules()
   if not self.config.auto_load_modules then
     return
@@ -1678,7 +1411,7 @@ function ModuleManager:autoLoadModules()
   local modules = self:getModuleList()
   local to_load = {}
   
-  -- Collect modules that need loading
+  -- Collect modules that need loading; infer load priority/order
   for id, info in pairs(modules) do
     if info.enabled and info.auto_load and not self.modules[id] then
       -- Auto-detect module location to determine if required or optional
@@ -1734,33 +1467,26 @@ function ModuleManager:autoLoadModules()
     return a.order < b.order
   end)
   
-  -- Load in order
+  -- Load in order, so dependencies initialize deterministically
   for _, module in ipairs(to_load) do
     cecho(string.format("<DimGrey>[EMERGE] Auto-loading %s...<reset>\n", module.id))
     self:loadModule(module.id)
   end
 end
 
--- Set GitHub token for private repositories
+-- Save a personal access token to enable private repo access and higher rate limits.
 function ModuleManager:setGitHubToken(token)
   if not token or token == "" then
     cecho("<DarkOrange>[EMERGE] GitHub Token Setup<reset>\n\n")
     cecho("<LightSteelBlue>To create a GitHub personal access token:<reset>\n")
     cecho("  1. Go to ")
-    cechoLink("https://github.com/settings/personal-access-tokens", [[openUrl("https://github.com/settings/personal-access-tokens")]], "Click to open in browser")
+    cechoLink("https://github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]], "Click to open in browser")
     echo("\n")
-    cecho("  2. Click 'Fine-grained personal access tokens'\n")
+    cecho("  2. Click 'Generate new token (classic)'\n")
     cecho("  3. Give it a name (e.g., 'Mudlet EMERGE')\n")
-    cecho("  4. Set expiration (90 days recommended)\n")
-    cecho("  5. Repository access: Select 'Selected repositories'\n")
-    cecho("     - Click the 'Select repositories' dropdown\n")
-    cecho("     - Search for and check: rjm11/emerge\n")
-    cecho("     - Search for and check: rjm11/emerge-private\n")
-    cecho("  6. Scroll down to 'Repository permissions'\n")
-    cecho("     - Find 'Contents' row\n")
-    cecho("     - Click dropdown and select 'Read'\n")
-    cecho("  7. Scroll to bottom, click 'Generate token'\n")
-    cecho("  8. Copy the token that starts with 'github_pat_'\n\n")
+    cecho("  4. Select the 'repo' scope checkbox\n")
+    cecho("  5. Click 'Generate token' at the bottom\n")
+    cecho("  6. Copy the token that starts with 'ghp_'\n\n")
     cecho("<SteelBlue>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
     return
   end
@@ -1769,87 +1495,10 @@ function ModuleManager:setGitHubToken(token)
   self:saveConfig()
   
   cecho("<LightSteelBlue>[EMERGE] GitHub token saved<reset>\n")
-  cecho("<DimGrey>Verifying access to repositories...<reset>\n")
-  
-  -- Force refresh to verify token works (silent)
-  local old_debug = self.config.debug
-  self.config.debug = false  -- Temporarily disable debug output
-  self:refreshCache(true)
-  self.config.debug = old_debug  -- Restore debug setting
-  
-  -- After discovery completes, check if we found any private modules
-  tempTimer(2, function()
-    local private_modules_found = false
-    for id, module in pairs(self.discovery_cache.modules or {}) do
-      if module.repository == "emerge-private" then
-        private_modules_found = true
-        break
-      end
-    end
-    
-    if private_modules_found then
-      cecho("<green>[EMERGE] ✓ Successfully connected to private repositories<reset>\n")
-      cecho("<DimGrey>Use 'emodule list' to see available modules<reset>\n")
-    else
-      cecho("<yellow>[EMERGE] ⚠ Token saved but could not access private repositories<reset>\n")
-      cecho("<DimGrey>Please verify your token has 'repo' scope permissions<reset>\n")
-    end
-  end)
+  cecho("<DimGrey>You can now access private repositories<reset>\n")
 end
 
--- Show developer module warning
-function ModuleManager:showDevModuleWarning()
-  cecho("<yellow>WARNING: This command will pull and install untested developer modules from the emerge-dev repository.<reset>\n")
-  cecho("<yellow>These modules may be unstable and could cause issues.<reset>\n")
-  cecho("<LightSteelBlue>To proceed, type: edev confirm<reset>\n")
-end
-
--- Execute loading of developer modules
-function ModuleManager:_executeLoadDevModules()
-  cecho("<green>[EMERGE] Loading developer modules...<reset>\n")
-
-  local dev_repo
-  for _, repo_config in ipairs(self.repositories) do
-    if repo_config.name == "emerge-dev" then
-      dev_repo = repo_config
-      break
-    end
-  end
-
-  if not dev_repo then
-    cecho("<red>[EMERGE] emerge-dev repository not configured.<reset>\n")
-    return
-  end
-
-  cecho(string.format("<DimGrey>[EMERGE] Fetching manifest from %s...<reset>\n", dev_repo.name))
-
-  self:downloadManifest(dev_repo, function(success, modules)
-    if success and modules then
-      -- First, update the discovery cache with the dev modules
-      for id, module_info in pairs(modules) do
-        module_info.repository = dev_repo.name
-        self.discovery_cache.modules[id] = module_info
-      end
-
-      local module_count = table.size(modules)
-      cecho(string.format("<LightSteelBlue>[EMERGE] Found %d developer modules. Installing...<reset>\n", module_count))
-
-      local i = 0
-      for id, module_info in pairs(modules) do
-        i = i + 1
-        -- Use a timer to load modules one by one
-        tempTimer(i * 0.5, function()
-          cecho(string.format("<DimGrey>[%d/%d] Loading %s...<reset>\n", i, module_count, id))
-          self:loadModule(id)
-        end)
-      end
-    else
-      cecho(string.format("<red>[EMERGE] Failed to download manifest from %s.<reset>\n", dev_repo.name))
-    end
-  end)
-end
-
--- Create aliases
+-- Create the 'emodule' command family for interactive control from the Mudlet command line.
 function ModuleManager:createAliases()
   -- Clean up old aliases
   for _, id in pairs(self.aliases) do
@@ -1861,20 +1510,7 @@ function ModuleManager:createAliases()
   
   -- Module management commands
   self.aliases.list = tempAlias("^emodule list$", [[EMERGE:listModules()]])
-  self.aliases.load = tempAlias("^emodule load (.+)$", [[
-    local args = matches[2]
-    if args == "required" then
-      EMERGE:loadRequiredModules()
-    else
-      -- Check for branch syntax: "branch-name module-name"
-      local branch, module = args:match("^([%w%-_%.]+)%s+([%w%-_%.]+)$")
-      if branch and module then
-        EMERGE:loadModule(module, branch)
-      else
-        EMERGE:loadModule(args)
-      end
-    end
-  ]])
+  self.aliases.load = tempAlias("^emodule load (.+)$", [[EMERGE:loadModule(matches[2])]])
   self.aliases.unload = tempAlias("^emodule unload ([^ ]+)$", [[EMERGE:unloadModule(matches[2])]])
   self.aliases.unload_confirm = tempAlias("^emodule unload ([^ ]+) (.+)$", [[EMERGE:unloadModule(matches[2], matches[3])]])
   self.aliases.github = tempAlias("^emodule github (.+)$", [[
@@ -1890,15 +1526,8 @@ function ModuleManager:createAliases()
   self.aliases.disable = tempAlias("^emodule disable (.+)$", [[EMERGE:toggleModule(matches[2], false)]])
   self.aliases.update = tempAlias("^emodule update$", [[EMERGE:checkAllUpdates()]])
   self.aliases.update_registry = tempAlias("^emodule update registry$", [[EMERGE:updateRegistry()]])
-  self.aliases.upgrade = tempAlias("^emodule upgrade (.+)$", [[EMERGE:upgradeComponent(matches[2])]])
-  self.aliases.upgrade_short = tempAlias("^emodule upgrade$", [[
-    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <manager|module|all><reset>\n")
-    cecho("<DimGrey>Examples:<reset>\n")
-    cecho("<DimGrey>  emodule upgrade manager      # Update the manager only<reset>\n")
-    cecho("<DimGrey>  emodule upgrade emerge-core  # Update a specific module<reset>\n")
-    cecho("<DimGrey>  emodule upgrade all          # Update everything<reset>\n")
-  ]])
-  self.aliases.upgrade_force = tempAlias("^emodule upgrade (.+) force$", [[EMERGE:upgradeComponent(matches[2], true)]])
+  self.aliases.upgrade = tempAlias("^emodule upgrade manager$", [[EMERGE:upgradeSelf()]])
+  self.aliases.upgrade_short = tempAlias("^emodule upgrade$", [[EMERGE:upgradeSelf()]])
   self.aliases.config = tempAlias("^emodule config$", [[EMERGE:showConfig()]])
   self.aliases.token = tempAlias("^emodule token (.+)$", [[EMERGE:setGitHubToken(matches[2])]])
   self.aliases.token_help = tempAlias("^emodule token$", [[EMERGE:setGitHubToken()]])
@@ -1918,41 +1547,32 @@ function ModuleManager:createAliases()
     end
   ]])
   
-  -- Developer commands
-  self.aliases.edev = tempAlias("^edev$", [[EMERGE:showDevModuleWarning()]])
-  self.aliases.edev_confirm = tempAlias("^edev confirm$", [[EMERGE:_executeLoadDevModules()]])
-
   -- New discovery commands
   self.aliases.refresh = tempAlias("^emodule refresh$", [[EMERGE:refreshCache(true)]])
   self.aliases.repos = tempAlias("^emodule repos$", [[EMERGE:listRepositories()]])
   self.aliases.search = tempAlias("^emodule search (.+)$", [[EMERGE:searchModules(matches[2])]])
   self.aliases.info = tempAlias("^emodule info (.+)$", [[EMERGE:showModuleInfo(matches[2])]])
-  self.aliases.debug = tempAlias("^emodule debug$", [[EMERGE:toggleDebug()]])
+  self.aliases.test = tempAlias("^emodule test (.+)$", [[EMERGE:testModule(matches[2])]])
+
+  -- Dev repository commands
+  self.aliases.edev_diff = tempAlias("^emodule dev diff (.+)$", [[EMERGE:diffDevModule(matches[2])]])
+  self.aliases.edev_unload = tempAlias("^emodule dev unload$", [[EMERGE:unloadDevModules()]])
+  self.aliases.edev_list = tempAlias("^emodule dev list$", [[EMERGE:listDevModules()]])
+  self.aliases.edev_test = tempAlias("^emodule dev test (.+)$", [[EMERGE:testDevModule(matches[2])]])
+  self.aliases.edev_confirm = tempAlias("^emodule dev confirm$", [[EMERGE:confirmDevModules()]])
+  self.aliases.edev = tempAlias("^emodule dev$", [[EMERGE:showDevHelp()]])
 end
 
--- Toggle debug mode
-function ModuleManager:toggleDebug()
-  self.config.debug = not self.config.debug
-  self:saveConfig()
-  if self.config.debug then
-    cecho("<LightSteelBlue>[EMERGE] Debug mode enabled<reset>\n")
-  else
-    cecho("<LightSteelBlue>[EMERGE] Debug mode disabled<reset>\n")
-  end
-end
-
--- List modules command
+-- Combined view: currently loaded modules and available (but not loaded) modules by repository.
 function ModuleManager:listModules()
-  local function display_list()
-    -- Using 100-character width for consistent formatting
-    cecho("\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
-    cecho("<LightSteelBlue>                                    🚀 EMERGE Module System<reset>\n")
-    cecho("<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n\n")
+  local function display_modules()
+    cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
+    cecho("<LightSteelBlue>EMERGE Module System<reset>\n")
+    cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
 
     -- Show currently loaded modules
-    cecho("<LightSteelBlue>● Currently Loaded Modules<reset>\n")
-    cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
-    cecho(string.format("  <SteelBlue>emerge-manager<reset> <DimGrey>v%s<reset> <yellow>●<reset> <DimGrey>core system<reset>\n", self.version))
+    cecho("<LightSteelBlue>Currently Loaded:<reset>\n")
+    cecho(string.format("  <SteelBlue>• emerge-manager<reset> v%s <DimGrey>(core system)<reset>\n", self.version))
 
     if next(self.modules) then
       for id, module in pairs(self.modules) do
@@ -1964,94 +1584,88 @@ function ModuleManager:listModules()
             update_status = " <yellow>(update available)<reset>"
           end
         end
-        cecho(string.format("  <SteelBlue>%s<reset> v%s - %s%s\n",
+        cecho(string.format("  <SteelBlue>• %s<reset> v%s - %s%s\n",
           id, module.version or "?", module.name or "Unknown", update_status))
       end
-    else
-      cecho("  <DimGrey>No additional modules loaded<reset>\n")
     end
-    
-    -- Separate and organize modules by repository and type
+
+    -- Show available modules from all sources (discovery + custom overrides)
     local all_modules = self:getModuleList()
-    local required_by_repo = {}
-    local optional_by_repo = {}
-    
+    local available_count = 0
+    local available_modules = {}
+
     for id, info in pairs(all_modules) do
-      if not self.modules[id] and id ~= "emerge-manager" then
-        local is_required = (info.type == "required" or info.type == "core" or info.category == "required" or id:match("^emerge%-core") or id:match("^core%-"))
-        local repo = info.repository or "unknown"
-
-        if is_required then
-          required_by_repo[repo] = required_by_repo[repo] or {}
-          table.insert(required_by_repo[repo], {id = id, info = info})
-        else
-          optional_by_repo[repo] = optional_by_repo[repo] or {}
-          table.insert(optional_by_repo[repo], {id = id, info = info})
-        end
-      end
-    end
-    
-    for _, modules in pairs(required_by_repo) do table.sort(modules, function(a, b) return a.id < b.id end) end
-    for _, modules in pairs(optional_by_repo) do table.sort(modules, function(a, b) return a.id < b.id end) end
-    
-    local total_required = 0; for _, m in pairs(required_by_repo) do total_required = total_required + #m end
-    if total_required > 0 then
-      cecho("\n<LightSteelBlue>● Required Modules<reset> <DimGrey>(essential for combat system)<reset>\n")
-      cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
-      local repos = {}; for r in pairs(required_by_repo) do table.insert(repos, r) end; table.sort(repos)
-      for _, repo in ipairs(repos) do
-        cecho(string.format("\n  <DimGrey>── %s ──<reset>\n", repo))
-        for _, entry in ipairs(required_by_repo[repo]) do
-          local v_info = entry.info.version and " v" .. entry.info.version or ""
-          cecho(string.format("    <green>◆<reset> <SteelBlue>%s<reset>%s - %s\n", entry.id, v_info, entry.info.name or entry.info.description or "No description"))
-        end
-      end
-      cecho("\n  <SlateGray>💡 <LightBlue>Quick start: <SteelBlue>emodule load required<reset>\n")
-    end
-    
-    local total_optional = 0; for _, m in pairs(optional_by_repo) do total_optional = total_optional + #m end
-    if total_optional > 0 then
-      cecho("\n<LightSteelBlue>● Optional Modules<reset> <DimGrey>(additional features)<reset>\n")
-      cecho("<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
-      local repos = {}; for r in pairs(optional_by_repo) do table.insert(repos, r) end; table.sort(repos)
-      for _, repo in ipairs(repos) do
-        cecho(string.format("\n  <DimGrey>── %s ──<reset>\n", repo))
-        for _, entry in ipairs(optional_by_repo[repo]) do
-          local v_info = entry.info.version and " v" .. entry.info.version or ""
-          cecho(string.format("    <yellow>◇<reset> <SteelBlue>%s<reset>%s - %s\n", entry.id, v_info, entry.info.name or entry.info.description or "No description"))
-        end
+      if not self.modules[id] then
+        available_count = available_count + 1
+        table.insert(available_modules, {id = id, info = info})
       end
     end
 
-    if total_required == 0 and total_optional == 0 then
+    -- Sort available modules by repository (public, private, custom)
+    table.sort(available_modules, function(a, b)
+      local repo_a = a.info.repository or "custom"
+      local repo_b = b.info.repository or "custom"
+      if repo_a ~= repo_b then
+        return repo_a < repo_b
+      end
+      return a.id < b.id
+    end)
+
+    if available_count > 0 then
+      cecho("\n<LightSteelBlue>Available to Load:<reset>\n")
+      local current_repo = nil
+      for _, entry in ipairs(available_modules) do
+        local id = entry.id
+        local info = entry.info
+
+        -- Group by repository
+        local repo_name = info.repository or "custom"
+        if repo_name ~= current_repo then
+          if current_repo then cecho("\n") end
+          cecho(string.format("  <DimGrey>%s:<reset>\n", repo_name))
+          current_repo = repo_name
+        end
+
+        local source = ""
+        if info.github then
+          source = string.format("<DimGrey>(%s/%s)<reset>",
+            info.github.owner, info.github.repo)
+        end
+
+        local version_info = ""
+        if info.version then
+          version_info = " v" .. info.version
+        end
+
+        cecho(string.format("    <SteelBlue>• %s<reset>%s - %s %s\n",
+          id, version_info, info.name or info.description or "Unknown", source))
+      end
+    else
       cecho("\n<DimGrey>No additional modules available<reset>\n")
       cecho("<DimGrey>Try 'emodule refresh' to update module list<reset>\n")
     end
 
-    cecho("\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
-    cecho("<DimGrey>📋 Commands: <SteelBlue>emodule load <module><reset> <DimGrey>│<reset> <SteelBlue>emodule help<reset> <DimGrey>│<reset> <SteelBlue>emodule update<reset>\n")
-
-    local age = os.time() - self.discovery_cache.last_refresh
+    -- Show cache status to help users understand discovery recency
+    local cache_age = os.time() - self.discovery_cache.last_refresh
     if self.discovery_cache.last_refresh > 0 then
-      cecho(string.format("<DimGrey>🕒 Last updated: %d minutes ago<reset> <DimGrey>│<reset> <yellow>⚠️  Beta v%s<reset>\n", math.floor(age / 60), self.version))
+      cecho(string.format("\n<DimGrey>Cache last updated: %d minutes ago<reset>\n",
+        math.floor(cache_age / 60)))
     end
+
+    cecho("\n<DimGrey>Type 'emodule help' for all commands<reset>\n")
   end
 
-  -- Refresh cache if it's stale, then display the list. Otherwise, display immediately.
-  local cache_age = os.time() - self.discovery_cache.last_refresh
-  if cache_age > self.discovery_cache.cache_duration then
-    local old_debug = self.config.debug
-    self.config.debug = false
-    self:refreshCache(false, function()
-      self.config.debug = old_debug
-      display_list()
-    end)
-  else
-    display_list()
-  end
+  -- Refresh cache if needed, then display
+  self:refreshCache(false, function(success)
+    if success then
+      display_modules()
+    else
+      cecho("<IndianRed>[EMERGE] Could not refresh module list from repositories.<reset>\n")
+    end
+  end)
 end
 
--- Show configuration
+-- Print current manager configuration and where it is stored
 function ModuleManager:showConfig()
   cecho("<SlateGray>==== Module Manager Configuration ====<reset>\n\n")
   cecho(string.format("<LightSteelBlue>Version:<reset> %s\n", self.version))
@@ -2063,7 +1677,7 @@ function ModuleManager:showConfig()
   cecho(string.format("Config location: %s\n", self.paths.config))
 end
 
--- Show GitHub setup help
+-- Guided instructions (printed in-client) to create and save a GitHub token
 function ModuleManager:showGitHubHelp()
   cecho([[
 <SlateGray>==== GitHub Integration Setup Guide ====<reset>
@@ -2076,14 +1690,12 @@ function ModuleManager:showGitHubHelp()
   2. Click <SteelBlue>"Generate new token"<reset> → <SteelBlue>"Fine-grained personal access tokens"<reset>
   3. Give it a name like <DimGrey>"Mudlet EMERGE Access"<reset>
   4. Set expiration (recommended: <SteelBlue>90 days<reset>)
-  5. Repository access: Choose <SteelBlue>Selected repositories<reset>
-     - Click <SteelBlue>"Select repositories"<reset> dropdown
-     - Search and check: <DimGrey>rjm11/emerge<reset>
-     - Search and check: <DimGrey>rjm11/emerge-private<reset>
-  6. Scroll down to <SteelBlue>Repository permissions<reset>
-     - Find <SteelBlue>Contents<reset> row
-     - Click dropdown → Select <SteelBlue>Read<reset>
-  7. Scroll to bottom and click <SteelBlue>"Generate token"<reset>
+  5. Repository access:
+     • <SteelBlue>All repositories<reset> (easier) OR
+     • <SteelBlue>Selected repositories<reset> (choose specific private repos)
+  6. Repository permissions:
+     ✓ <SteelBlue>Contents<reset>: Read (minimum for public/private repos)
+  7. Click <SteelBlue>"Generate token"<reset> at the bottom
   8. <yellow>IMPORTANT: Copy the token NOW - you won't see it again!<reset>
      Token looks like: <DimGrey>github_pat_xxxxxxxxxxxxxxxxxxxx<reset>
 
@@ -2110,7 +1722,294 @@ function ModuleManager:showGitHubHelp()
 ]])
 end
 
--- Show help
+-- Instructions for the developer-focused 'edev' command
+function ModuleManager:showDevHelp()
+  cecho([[
+<SlateGray>==== EMERGE Developer Commands ====<reset>
+
+<yellow>WARNING: These commands are for developers only.<reset>
+They interact with the <SteelBlue>emerge-dev<reset> repository which contains
+untested and potentially unstable modules.
+
+<LightSteelBlue>Available Commands:<reset>
+  <SteelBlue>emodule dev list<reset>
+    Lists all modules available in the emerge-dev repository.
+
+  <SteelBlue>emodule dev test <module_id><reset>
+    Downloads and loads a single specified module from emerge-dev.
+
+  <SteelBlue>emodule dev unload<reset>
+    Unloads all modules that belong to the emerge-dev repository.
+
+  <SteelBlue>emodule dev diff <module_id><reset>
+    Compares the version of a module across all repositories.
+
+  <SteelBlue>emodule dev confirm<reset>
+    Downloads and loads <red>ALL<reset> modules from emerge-dev.
+
+Use these commands only if you are actively developing and testing.
+]])
+end
+
+-- Connect to the dev repo, download manifest, and load all modules from it.
+function ModuleManager:confirmDevModules()
+  cecho("<yellow>[EMERGE] Accessing development repository...<reset>")
+
+  -- Find the emerge-dev repository configuration
+  local dev_repo_config
+  for _, repo in ipairs(self.repositories) do
+    if repo.name == "emerge-dev" then
+      dev_repo_config = repo
+      break
+    end
+  end
+
+  if not dev_repo_config then
+    cecho("<IndianRed>[EMERGE] 'emerge-dev' repository not configured.<reset>")
+    return
+  end
+
+  cecho(string.format("<DimGrey>[EMERGE] Fetching manifest from %s...<reset>", dev_repo_config.name))
+
+  -- Download the manifest from the dev repo
+  self:downloadManifest(dev_repo_config, function(success, modules)
+    if not success then
+      cecho(string.format("<IndianRed>[EMERGE] Failed to download manifest for %s.<reset>", dev_repo_config.name))
+      return
+    end
+
+    if not modules or not next(modules) then
+        cecho(string.format("<yellow>[EMERGE] No modules found in %s repository.<reset>", dev_repo_config.name))
+        return
+    end
+
+    cecho(string.format("<LightSteelBlue>[EMERGE] Found %d modules in dev repo. Updating cache and loading...<reset>", table.size(modules)))
+
+    -- Manually update the discovery cache with the modules from the dev manifest
+    for id, module_info in pairs(modules) do
+        module_info.repository = dev_repo_config.name
+        module_info.github = module_info.github or {
+            owner = dev_repo_config.owner,
+            repo = dev_repo_config.repo,
+            branch = dev_repo_config.branch
+        }
+        -- This will add or overwrite modules from the dev repo in the cache
+        self.discovery_cache.modules[id] = module_info
+    end
+
+    -- Load each module from the manifest
+    for id, _ in pairs(modules) do
+      cecho(string.format("<DimGrey>[EMERGE] Requesting to load dev module: %s<reset>", id))
+      self:loadModule(id)
+    end
+  end)
+end
+
+-- Lists all modules available in the emerge-dev repository.
+function ModuleManager:listDevModules()
+  cecho("<LightSteelBlue>[EMERGE] Listing modules from emerge-dev repository...<reset>")
+
+  -- Find the emerge-dev repository configuration
+  local dev_repo_config
+  for _, repo in ipairs(self.repositories) do
+    if repo.name == "emerge-dev" then
+      dev_repo_config = repo
+      break
+    end
+  end
+
+  if not dev_repo_config then
+    cecho("<IndianRed>[EMERGE] 'emerge-dev' repository not configured.<reset>")
+    return
+  end
+
+  cecho(string.format("<DimGrey>[EMERGE] Fetching manifest from %s...<reset>", dev_repo_config.name))
+
+  -- Download the manifest from the dev repo
+  self:downloadManifest(dev_repo_config, function(success, modules)
+    if not success then
+      cecho(string.format("<IndianRed>[EMERGE] Failed to download manifest for %s.<reset>", dev_repo_config.name))
+      return
+    end
+
+    if not modules or not next(modules) then
+        cecho(string.format("<yellow>[EMERGE] No modules found in %s repository.<reset>", dev_repo_config.name))
+        return
+    end
+
+    cecho(string.format("\n<SlateGray>─── emerge-dev Modules (%d) ───<reset>", table.size(modules)))
+    for id, info in pairs(modules) do
+        local version = info.version or "N/A"
+        local description = info.description or "No description."
+        cecho(string.format("\n<SteelBlue>%s<reset> (v%s)", id, version))
+        cecho(string.format("  <DimGrey>%s<reset>", description))
+    end
+    cecho("\n<SlateGray>──────────────────────────────<reset>")
+  end)
+end
+
+-- Downloads and loads a single module from the emerge-dev repository for testing.
+function ModuleManager:testDevModule(module_id)
+  if not module_id or module_id == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule dev test <module_id><reset>")
+    return
+  end
+
+  cecho(string.format("<LightSteelBlue>[EMERGE] Testing module '%s' from emerge-dev...<reset>", module_id))
+
+  -- Find the emerge-dev repository configuration
+  local dev_repo_config
+  for _, repo in ipairs(self.repositories) do
+    if repo.name == "emerge-dev" then
+      dev_repo_config = repo
+      break
+    end
+  end
+
+  if not dev_repo_config then
+    cecho("<IndianRed>[EMERGE] 'emerge-dev' repository not configured.<reset>")
+    return
+  end
+
+  cecho(string.format("<DimGrey>[EMERGE] Fetching manifest from %s to find module...<reset>", dev_repo_config.name))
+
+  -- Download the manifest from the dev repo to find the module info
+  self:downloadManifest(dev_repo_config, function(success, modules)
+    if not success then
+      cecho(string.format("<IndianRed>[EMERGE] Failed to download manifest for %s.<reset>", dev_repo_config.name))
+      return
+    end
+
+    local module_info = modules and modules[module_id]
+
+    if not module_info then
+      cecho(string.format("<IndianRed>[EMERGE] Module '%s' not found in the emerge-dev repository.<reset>", module_id))
+      cecho("<DimGrey>Use 'emodule dev list' to see available modules.<reset>")
+      return
+    end
+
+    cecho(string.format("<DimGrey>[EMERGE] Found module '%s'. Updating cache and loading...<reset>", module_id))
+
+    -- Manually update the discovery cache with the specific module's info
+    module_info.repository = dev_repo_config.name
+    module_info.github = module_info.github or {
+        owner = dev_repo_config.owner,
+        repo = dev_repo_config.repo,
+        branch = dev_repo_config.branch
+    }
+    self.discovery_cache.modules[module_id] = module_info
+
+    -- Now load the module
+    self:loadModule(module_id)
+  end)
+end
+
+-- Unloads all modules that are part of the emerge-dev repository.
+function ModuleManager:unloadDevModules()
+  cecho("<yellow>[EMERGE] Unloading all modules from emerge-dev repository...<reset>")
+
+  -- Find the emerge-dev repository configuration
+  local dev_repo_config
+  for _, repo in ipairs(self.repositories) do
+    if repo.name == "emerge-dev" then
+      dev_repo_config = repo
+      break
+    end
+  end
+
+  if not dev_repo_config then
+    cecho("<IndianRed>[EMERGE] 'emerge-dev' repository not configured.<reset>")
+    return
+  end
+
+  -- Download the manifest from the dev repo to know which modules to unload
+  self:downloadManifest(dev_repo_config, function(success, modules)
+    if not success then
+      cecho(string.format("<IndianRed>[EMERGE] Failed to download manifest for %s. Cannot unload dev modules.<reset>", dev_repo_config.name))
+      return
+    end
+
+    if not modules or not next(modules) then
+        cecho(string.format("<yellow>[EMERGE] No modules found in %s repository to unload.<reset>", dev_repo_config.name))
+        return
+    end
+
+    local unloaded_count = 0
+    for id, _ in pairs(modules) do
+      if self.modules[id] then
+        self:unloadModule(id)
+        unloaded_count = unloaded_count + 1
+      end
+    end
+
+    if unloaded_count > 0 then
+      cecho(string.format("<LightSteelBlue>[EMERGE] Unloaded %d module(s) from the dev repository.<reset>", unloaded_count))
+    else
+      cecho("<LightSteelBlue>[EMERGE] No dev modules were loaded.<reset>")
+    end
+  end)
+end
+
+-- Compares the version of a module across all configured repositories.
+function ModuleManager:diffDevModule(module_id)
+  if not module_id or module_id == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule dev diff <module_id><reset>")
+    return
+  end
+
+  cecho(string.format("<LightSteelBlue>[EMERGE] Comparing versions for module '%s' across all repositories...<reset>", module_id))
+
+  local versions = {}
+  local pending_downloads = #self.repositories
+  local completed_downloads = 0
+
+  local function print_diff()
+    if table.size(versions) == 0 then
+      cecho(string.format("<yellow>[EMERGE] Module '%s' not found in any repository.<reset>", module_id))
+      return
+    end
+
+    cecho(string.format("\n<SlateGray>─── Version Comparison for: %s ───<reset>", module_id))
+
+    local dev_version = versions["emerge-dev"]
+
+    for repo_name, version in pairs(versions) do
+      local color = "DimGrey"
+      local note = ""
+      if dev_version then
+        if repo_name == "emerge-dev" then
+          color = "SteelBlue"
+        else
+          local comparison = self:compareVersions(dev_version, version)
+          if comparison > 0 then
+            color = "green"
+            note = " (dev is newer)"
+          elseif comparison < 0 then
+            color = "IndianRed"
+            note = " (dev is older)"
+          end
+        end
+      end
+      cecho(string.format("  <%s>• %-16s: v%s%s<reset>", color, repo_name, version, note))
+    end
+    cecho("<SlateGray>──────────────────────────────────────────<reset>")
+  end
+
+  for _, repo_config in ipairs(self.repositories) do
+    self:downloadManifest(repo_config, function(success, modules)
+      completed_downloads = completed_downloads + 1
+      if success and modules and modules[module_id] then
+        versions[repo_config.name] = modules[module_id].version or "N/A"
+      end
+
+      if completed_downloads >= pending_downloads then
+        print_diff()
+      end
+    end)
+  end
+end
+
+-- Help index for all supported 'emodule' commands
 function ModuleManager:showHelp()
   -- Check if GitHub token is saved
   local token_status = ""
@@ -2126,8 +2025,6 @@ function ModuleManager:showHelp()
 <LightSteelBlue>Core Commands:<reset>
   <SteelBlue>emodule list<reset>             List all modules (loaded & available)
   <SteelBlue>emodule load <id><reset>        Download and load a module
-  <SteelBlue>emodule load <branch> <id><reset>  Load module from specific branch
-  <SteelBlue>emodule load required<reset>    Load all required modules
   <SteelBlue>emodule unload <id><reset>      Unload a loaded module
   <SteelBlue>emodule enable <id><reset>      Enable a module for auto-loading
   <SteelBlue>emodule disable <id><reset>     Disable a module
@@ -2148,22 +2045,35 @@ function ModuleManager:showHelp()
   <SteelBlue>emodule token <token><reset>    Set GitHub token for private repos
   
 <LightSteelBlue>Update Commands:<reset>
-  <SteelBlue>emodule update<reset>           Check all components for updates
-  <SteelBlue>emodule upgrade <target><reset> Upgrade manager/module/all
+  <SteelBlue>emodule update<reset>           Check all modules for updates
+  <SteelBlue>emodule upgrade<reset>          Upgrade EMERGE manager itself
+  <SteelBlue>emodule update registry<reset>  Update the module registry
   
 <LightSteelBlue>Other Commands:<reset>
   <SteelBlue>emodule config<reset>           Show current configuration
   <SteelBlue>emodule help<reset>             Show this help (or just 'emodule')
 
-<LightSteelBlue>Developer Commands:<reset>
-  <SteelBlue>edev<reset>                     Show warning and instructions for developer modules
-  <SteelBlue>edev confirm<reset>             Load all modules from the emerge-dev repository
+<LightSteelBlue>Examples:<reset>
+  <DimGrey>Discovery & Search:<reset>
+  emodule refresh                    # Update module list from all repos
+  emodule search combat              # Find combat-related modules
+  emodule info emerge-core           # Get detailed info about a module
+  
+  <DimGrey>Add from GitHub:<reset>
+  emodule github rjm11/mudlet-combat-module
+  emodule github https://github.com/user/repo
+  
+  <DimGrey>Manual add:<reset>
+  emodule add mymod {"name":"My Module","github":{"owner":"me","repo":"my-mod","file":"mod.lua"}}
+  
+  <DimGrey>Private repos:<reset>
+  emodule token ghp_your_github_personal_access_token
 
-<DimGrey>Configuration: ]] .. self.paths.config .. [[<reset>
+<DimGrey>Configuration saved to: ]] .. self.paths.config .. [[<reset>
 ]])
 end
 
--- Add module via command
+-- Utility alias entry point: parse JSON and forward to addModule()
 function ModuleManager:addModuleCommand(id, json_str)
   if not id or id == "" or not json_str or json_str == "" then
     cecho("<IndianRed>[EMERGE] Usage: emodule add <id> <json_config><reset>\n")
@@ -2179,7 +2089,7 @@ function ModuleManager:addModuleCommand(id, json_str)
   end
 end
 
--- Show bootup sequence
+-- Cosmetic boot animation plus first-run flow. Schedules intro or quick-start based on config.
 function ModuleManager:showBootup()
   -- Clear some space
   echo("\n\n")
@@ -2225,7 +2135,7 @@ function ModuleManager:showBootup()
   end
 end
 
--- Show introduction for first-time users
+-- Short-circuit to quick start; marks first_run=false and persists.
 function ModuleManager:showIntroduction()
   -- Skip the long intro, just check modules immediately
   self:checkCoreModules()
@@ -2235,7 +2145,7 @@ function ModuleManager:showIntroduction()
   self:saveConfig()
 end
 
--- Show welcome message
+-- Quick start hints plus token prompt if needed.
 function ModuleManager:checkCoreModules()
   -- Since we don't have any fake modules anymore, just show the welcome
   cecho("\n<SlateGray>──────────────────────────────────────<reset>\n")
@@ -2265,7 +2175,7 @@ function ModuleManager:checkCoreModules()
   cecho("<reset>\n")
 end
 
--- Initialize
+-- Entry point executed at the end of the script. Sets up aliases, timers, discovery, and autoload.
 function ModuleManager:init()
   -- Load configuration
   self:loadConfig()
@@ -2273,6 +2183,9 @@ function ModuleManager:init()
   -- Create aliases
   self:createAliases()
   
+  -- Discover local modules immediately
+  self:discoverLocalModules()
+
   -- Schedule bootup sequence (5 seconds after game login)
   tempTimer(5, function()
     if EMERGE and EMERGE.loaded then
@@ -2299,21 +2212,20 @@ function ModuleManager:init()
     end
   end)
   
-  -- Schedule update check (DISABLED - only manual updates)
-  -- Automatic updates disabled - use 'emodule update' for manual checking
-  -- if self.config.auto_update then
-  --   tempTimer(40, function()
-  --     if EMERGE and EMERGE.loaded then
-  --       EMERGE.silent_check = true
-  --       EMERGE:checkAllUpdates()
-  --     end
-  --   end)
-  -- end
+  -- Schedule update check
+  if self.config.auto_update then
+    tempTimer(40, function()
+      if EMERGE and EMERGE.loaded then
+        EMERGE.silent_check = true
+        EMERGE:checkAllUpdates()
+      end
+    end)
+  end
   
   self.loaded = true
 end
 
--- Unload
+-- Clean up aliases and, unless updating, call each loaded module's unload() lifecycle.
 function ModuleManager:unload(updating)
   -- Clean up aliases
   for _, id in pairs(self.aliases) do
@@ -2335,7 +2247,8 @@ function ModuleManager:unload(updating)
   self.loaded = false
 end
 
--- Create persistent loader
+-- Create a persistent Script Group and Script in Mudlet so that EMERGE loads on client startup.
+-- idempotent; when forceCreate=true, attempts to clean and recreate artifacts.
 function ModuleManager:createPersistentLoader(forceCreate)
   -- Set flag to prevent duplicate loading during installation
   EMERGE.creating_bootloader = true
@@ -2469,7 +2382,7 @@ end
   EMERGE.creating_bootloader = false
 end
 
--- Add a manual install command
+-- Provide a command path for users to (re)create the bootloader if auto-install fails.
 function ModuleManager:manualInstall()
   cecho("<yellow>[EMERGE] Starting manual installation process...<reset>\n")
   
@@ -2489,7 +2402,7 @@ function ModuleManager:manualInstall()
   cecho("<LightSteelBlue>8. Save your profile (Ctrl+S or File → Save Profile)<reset>\n")
 end
 
--- Check installation status
+-- Diagnostic helper to verify presence of manager file, bootloader, and loaded state.
 function ModuleManager:checkStatus()
   cecho("<SlateGray>==== EMERGE Installation Status ====<reset>\n\n")
   
@@ -2526,7 +2439,7 @@ function ModuleManager:checkStatus()
   cecho("4. Restart Mudlet to test persistence\n")
 end
 
--- Auto-initialize
+-- Kick off initialization and persistence setup once the script is loaded.
 ModuleManager:init()
 
 -- Check if we're being loaded from the bootloader or from a fresh install
