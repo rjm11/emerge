@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.7.0
+-- Version: 0.7.1
 
-local CURRENT_VERSION = "0.7.0"
+local CURRENT_VERSION = "0.7.1"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -486,7 +486,7 @@ function ModuleManager:loadRequiredModules()
     -- Skip if already loaded or is the manager itself
     if not self.modules[id] and id ~= "emerge-manager" then
       local is_required = false
-      if info.type == "required" or info.type == "core" or info.category == "required" then
+      if info.required == true or info.type == "required" or info.type == "core" or info.category == "required" then
         is_required = true
       elseif id:match("^emerge%-core") or id:match("^core%-") then
         is_required = true
@@ -1802,7 +1802,7 @@ function ModuleManager:autoLoadModules()
       end
 
       -- Also check module metadata for type hint
-      if info.type == "required" or info.type == "core" then
+      if info.required == true or info.type == "required" or info.type == "core" then
         is_required = true
       elseif info.type == "optional" then
         is_required = false
@@ -2120,7 +2120,7 @@ function ModuleManager:listModules()
     if not self.modules[id] and id ~= "emerge-manager" then
       -- Check if module is required or optional
       local is_required = false
-      if info.type == "required" or info.type == "core" or info.category == "required" then
+      if info.required == true or info.type == "required" or info.type == "core" or info.category == "required" then
         is_required = true
       elseif id:match("^emerge%-core") or id:match("^core%-") then
         is_required = true
