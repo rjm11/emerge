@@ -2239,7 +2239,7 @@ function ModuleManager:listModules()
   cecho(
     "\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
   cecho(
-    "<DimGrey>📋 Commands: <SteelBlue>emodule load <module><reset> <DimGrey>│<reset> <SteelBlue>emodule help<reset> <DimGrey>│<reset> <SteelBlue>emodule update<reset>\n")
+    "<DimGrey>📋 Commands: <SteelBlue>emodule load <module><reset> <DimGrey>│<reset> <SteelBlue>emodule load &lt;repo&gt;/&lt;module&gt;<reset> <DimGrey>│<reset> <SteelBlue>emodule load &lt;branch&gt; &lt;repo&gt;/&lt;module&gt;<reset> <DimGrey>│<reset> <SteelBlue>emodule help<reset> <DimGrey>│<reset> <SteelBlue>emodule update<reset>\n")
 
   -- Show cache status
   local cache_age = os.time() - self.discovery_cache.last_refresh
