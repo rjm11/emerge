@@ -52,6 +52,7 @@ EMERGE.aliases = {}
 EMERGE.handlers = {}
 EMERGE.overwrite_queue = {}
 EMERGE.overwrite_in_progress = false
+EMERGE.loading_modules = EMERGE.loading_modules or {}
 
 -- For backward compatibility
 ModuleManager = EMERGE
@@ -464,12 +465,15 @@ function ModuleManager:loadRequiredModules()
 
   -- Always attempt to load the core stack first: core -> help -> gmcp
   local core_stack = { "emerge-core", "emerge-help", "emerge-gmcp" }
+  -- Track what we explicitly attempted here to avoid double-loading later in this function
+  local attempted = {}
   for _, mid in ipairs(core_stack) do
     if not self.modules[mid] then
       -- if present in module list, load it explicitly before discovery
       local module_info = self:getModuleList()[mid]
       if module_info then
         cecho(string.format("<DimGrey>[core-stack] Loading %s...<reset>\n", mid))
+        attempted[mid] = true
         self:loadModule(mid)
       else
         cecho(string.format(
@@ -483,8 +487,8 @@ function ModuleManager:loadRequiredModules()
 
   -- Find all required modules
   for id, info in pairs(all_modules) do
-    -- Skip if already loaded or is the manager itself
-    if not self.modules[id] and id ~= "emerge-manager" then
+    -- Skip if already loaded, already attempted above, or is the manager itself
+    if not self.modules[id] and not attempted[id] and id ~= "emerge-manager" then
       local is_required = false
       if info.required == true or info.type == "required" or info.type == "core" or info.category == "required" then
         is_required = true
@@ -557,6 +561,13 @@ function ModuleManager:loadModule(module_id, custom_branch)
     return
   end
 
+  -- Prevent duplicate concurrent loads
+  self.loading_modules = self.loading_modules or {}
+  if self.loading_modules[module_id] then
+    cecho(string.format("<DimGrey>[EMERGE] Already loading %s, skipping duplicate request.<reset>\n", module_id))
+    return
+  end
+
   if self.modules[module_id] and not self.pending_overwrite then
     if self.overwrite_in_progress then
       table.insert(self.overwrite_queue, { module_id = module_id, custom_branch = custom_branch })
@@ -579,6 +590,8 @@ function ModuleManager:loadModule(module_id, custom_branch)
       local pending = EMERGE.pending_overwrite
       if pending then
         cecho(string.format("<LightSteelBlue>[EMERGE] Overwriting module '%s'...<reset>\n", pending.module_id))
+        EMERGE.loading_modules = EMERGE.loading_modules or {}
+        EMERGE.loading_modules[pending.module_id] = true
         EMERGE:_executeLoadModule(pending.module_id, pending.custom_branch)
         EMERGE.pending_overwrite = nil
       end
@@ -609,6 +622,8 @@ function ModuleManager:loadModule(module_id, custom_branch)
     return
   end
 
+  self.loading_modules = self.loading_modules or {}
+  self.loading_modules[module_id] = true
   self:_executeLoadModule(module_id, custom_branch)
 end
 
@@ -775,6 +790,7 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
               cecho(string.format("<green>[EMERGE] Successfully loaded %s<reset>\n", module_id))
               self.modules[module_id] = module_info
               self:saveConfig()
+              if self.loading_modules then self.loading_modules[module_id] = nil end
 
               -- Also save to emerge directory for persistence
               if self.paths.modules then
@@ -794,17 +810,20 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
               end
             else
               cecho(string.format("<IndianRed>[EMERGE] Failed to execute %s<reset>\n", module_id))
+              if self.loading_modules then self.loading_modules[module_id] = nil end
               cecho(string.format("<DimGrey>Error: %s<reset>\n", tostring(err)))
               cecho(string.format("<DimGrey>File: %s<reset>\n", cache_file))
             end
           else
             cecho(string.format("<IndianRed>[EMERGE] Failed to parse %s<reset>\n", module_id))
+            if self.loading_modules then self.loading_modules[module_id] = nil end
             cecho(string.format("<DimGrey>Parse error: %s<reset>\n", tostring(load_err)))
             cecho(string.format("<DimGrey>File: %s<reset>\n", cache_file))
             cecho(string.format("<DimGrey>Check syntax and ensure file is valid Lua<reset>\n"))
           end
         else
           cecho(string.format("<IndianRed>[EMERGE] Failed to open cache file for writing<reset>\n"))
+          if self.loading_modules then self.loading_modules[module_id] = nil end
           cecho(string.format("<DimGrey>Attempted path: %s<reset>\n", cache_file))
           cecho(string.format("<DimGrey>Check permissions and disk space<reset>\n"))
         end
@@ -818,6 +837,7 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
 
       cecho(string.format("<IndianRed>[EMERGE] Failed to download %s: %s<reset>\n", module_id,
         errorMsg or "unknown error"))
+      if self.loading_modules then self.loading_modules[module_id] = nil end
     end
   end)
 
