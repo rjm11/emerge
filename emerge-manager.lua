@@ -517,6 +517,38 @@ function ModuleManager:loadRequiredModules()
   end
 end
 
+-- Repo-specific module lookup helper
+function ModuleManager:_getModuleFromRepo(repo_name, module_id)
+  if not repo_name or not module_id then return nil end
+  local manifests = self.discovery_cache and self.discovery_cache.manifests
+  local manifest = manifests and manifests[repo_name]
+  if not (manifest and manifest.modules) then return nil end
+
+  -- keyed lookup
+  local src = manifest.modules[module_id]
+  if src then
+    local info = {}
+    for k, v in pairs(src) do info[k] = v end
+    info.repository = repo_name
+    if info.path and not info.manifest_path then info.manifest_path = info.path end
+    return info
+  end
+
+  -- array-ish scan
+  for k, m in pairs(manifest.modules) do
+    local id = (m and (m.id or m.name)) or k
+    if id == module_id and type(m) == "table" then
+      local info = {}
+      for k2, v2 in pairs(m) do info[k2] = v2 end
+      info.repository = repo_name
+      if info.path and not info.manifest_path then info.manifest_path = info.path end
+      return info
+    end
+  end
+
+  return nil
+end
+
 -- Load a module from GitHub
 function ModuleManager:loadModule(module_id, custom_branch)
   if not module_id or module_id == "" then
@@ -581,7 +613,37 @@ function ModuleManager:loadModule(module_id, custom_branch)
 end
 
 function ModuleManager:_executeLoadModule(module_id, custom_branch)
-  local module_info = self:getModuleList()[module_id]
+  -- Parse repo-aware forms from alias or direct call
+  local source_repo, effective_module_id, effective_branch
+
+  -- 1) "branch repo/module"
+  local b, r, m = tostring(module_id):match("^([%w%-_%.]+)%s+([%w%-_%.]+)/([%w%-_%.]+)$")
+  if b and r and m then
+    effective_branch, source_repo, effective_module_id = b, r, m
+  else
+    -- 2) "repo/module"
+    local r2, m2 = tostring(module_id):match("^([%w%-_%.]+)/([%w%-_%.]+)$")
+    if r2 and m2 then
+      source_repo, effective_module_id = r2, m2
+    else
+      effective_module_id = module_id
+    end
+  end
+
+  -- prefer parsed branch if provided
+  if effective_branch and not custom_branch then custom_branch = effective_branch end
+
+  -- resolve module info (repo-specific if provided)
+  local module_info
+  if source_repo then
+    module_info = self:_getModuleFromRepo(source_repo, effective_module_id)
+  else
+    module_info = self:getModuleList()[effective_module_id]
+  end
+
+  -- unify id for subsequent logic and messages
+  module_id = effective_module_id or module_id
+
   if not module_info then
     cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
     cecho("<DimGrey>Try 'emodule list' to see available modules<reset>\n")
@@ -1915,7 +1977,21 @@ function ModuleManager:createAliases()
     if args == "required" then
       EMERGE:loadRequiredModules()
     else
-      -- Check for branch syntax: "branch-name module-name"
+      -- Support: "<branch> <repo>/<module>"
+      local b, r, m = args:match("^([%w%-_%.]+)%s+([%w%-_%.]+)/([%w%-_%.]+)$")
+      if b and r and m then
+        EMERGE:loadModule(r .. "/" .. m, b)
+        return
+      end
+
+      -- Support: "<repo>/<module>"
+      local r2, m2 = args:match("^([%w%-_%.]+)/([%w%-_%.]+)$")
+      if r2 and m2 then
+        EMERGE:loadModule(r2 .. "/" .. m2)
+        return
+      end
+
+      -- Support: "<branch> <module>"
       local branch, module = args:match("^([%w%-_%.]+)%s+([%w%-_%.]+)$")
       if branch and module then
         EMERGE:loadModule(module, branch)
@@ -2251,7 +2327,9 @@ function ModuleManager:showHelp()
 <LightSteelBlue>Core Commands:<reset>
   <SteelBlue>emodule list<reset>             List all modules (loaded & available)
   <SteelBlue>emodule load <id><reset>        Download and load a module
+  <SteelBlue>emodule load <repo>/<id><reset> Load from a specific repository
   <SteelBlue>emodule load <branch> <id><reset>  Load module from specific branch
+  <SteelBlue>emodule load <branch> <repo>/<id><reset>  Load from branch and repo
   <SteelBlue>emodule load required<reset>    Load all required modules
   <SteelBlue>emodule unload <id><reset>      Unload a loaded module
   <SteelBlue>emodule enable <id><reset>      Enable a module for auto-loading
