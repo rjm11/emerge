@@ -1063,11 +1063,22 @@ end
 
 -- Async version of checkSelfUpdate that uses callbacks
 function ModuleManager:checkSelfUpdateAsync(callback)
+  -- Use emerge-dev repo if dev mode is active, otherwise use main repo
+  local github_config = self.github
+  if self.config.show_dev_modules then
+    github_config = {
+      owner = "robertmassey",
+      repo = "emerge-dev", 
+      branch = "main",
+      files = { manager = "emerge-manager.lua" }
+    }
+  end
+  
   local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
-    self.github.owner,
-    self.github.repo,
-    self.github.branch,
-    self.github.files.manager)
+    github_config.owner,
+    github_config.repo,
+    github_config.branch,
+    github_config.files.manager)
 
   -- Add headers for private repos if token is available
   local headers = {}
@@ -1297,13 +1308,25 @@ function ModuleManager:upgradeSelf(force)
   -- Check for updates first if we don't have a pending update
   if not self.pending_update then
     cecho("<DimGrey>[EMERGE] Checking for updates...<reset>\n")
+    
+    -- Use emerge-dev repo if dev mode is active, otherwise use main repo
+    local github_config = self.github
+    if self.config.show_dev_modules then
+      github_config = {
+        owner = "robertmassey",
+        repo = "emerge-dev", 
+        branch = "main",
+        files = { manager = "emerge-manager.lua" }
+      }
+      cecho("<DimGrey>[EMERGE] Dev mode active - checking emerge-dev repository...<reset>\n")
+    end
 
     -- Add timestamp to bypass GitHub's cache
     local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s?t=%d",
-      self.github.owner,
-      self.github.repo,
-      self.github.branch,
-      self.github.files.manager,
+      github_config.owner,
+      github_config.repo,
+      github_config.branch,
+      github_config.files.manager,
       os.time())
 
     -- Add headers for private repos if token is available
@@ -2119,7 +2142,7 @@ end
 
 -- Execute loading of developer modules
 function ModuleManager:_executeLoadDevModules()
-  cecho("<green>[EMERGE] Loading developer modules...<reset>\n")
+  cecho("<green>[EMERGE] Enabling developer modules...<reset>\n")
 
   local dev_repo
   for _, repo_config in ipairs(self.repositories) do
@@ -2133,12 +2156,17 @@ function ModuleManager:_executeLoadDevModules()
     cecho("<red>[EMERGE] emerge-dev repository not configured.<reset>\n")
     return
   end
+  
+  -- Enable dev modules flag
+  self.config.show_dev_modules = true
+  self:saveConfig()
 
   cecho(string.format("<DimGrey>[EMERGE] Fetching manifest from %s...<reset>\n", dev_repo.name))
 
   self:downloadManifest(dev_repo, function(success, modules)
     if success and modules then
-      -- First, update the discovery cache with the dev modules
+      -- Update the discovery cache with the dev modules (do NOT auto-load)
+      local added_count = 0
       for idx, module_info in pairs(modules) do
         -- Extract proper module ID from module info
         local module_id = module_info and (module_info.id or module_info.name)
@@ -2149,30 +2177,16 @@ function ModuleManager:_executeLoadDevModules()
         if module_id then
           module_info.repository = dev_repo.name
           self.discovery_cache.modules[module_id] = module_info
+          added_count = added_count + 1
         end
       end
-
-      local module_count = tsize(modules)
-      cecho(string.format("<LightSteelBlue>[EMERGE] Found %d developer modules. Installing...<reset>\n",
-        module_count))
-
-      local i = 0
-      for idx, module_info in pairs(modules) do
-        -- Extract proper module ID from module info
-        local module_id = module_info and (module_info.id or module_info.name)
-        if not module_id and module_info and module_info.github and module_info.github.file then
-          module_id = tostring(module_info.github.file):match("([^/]+)%.lua$")
-        end
-        
-        if module_id then
-          i = i + 1
-          -- Use a timer to load modules one by one
-          tempTimer(i * 0.5, function()
-            cecho(string.format("<DimGrey>[%d/%d] Loading %s...<reset>\n", i, module_count, module_id))
-            self:loadModule(module_id)
-          end)
-        end
-      end
+      
+      cecho(string.format("<LightSteelBlue>[EMERGE] Found %d developer modules in discovery cache.<reset>\n", added_count))
+      cecho("<DimGrey>Use 'emodule list' to see available modules.<reset>\n")
+      cecho("<DimGrey>Use 'emodule load <module>' to load specific modules.<reset>\n")
+      
+      -- Save the updated discovery cache
+      self:saveDiscoveryCache()
     else
       cecho(string.format("<red>[EMERGE] Failed to download manifest from %s.<reset>\n", dev_repo.name))
     end
@@ -2329,11 +2343,17 @@ function ModuleManager:listModules()
   cecho("<LightSteelBlue>● Currently Loaded Modules<reset>\n")
   cecho(
     "<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
+  
+  -- Show emerge-manager first (always core system)
   cecho(string.format(
     "  <SteelBlue>emerge-manager<reset> <DimGrey>v%s<reset> <yellow>●<reset> <DimGrey>core system<reset>\n", self
     .version))
 
   if next(self.modules) then
+    -- Group loaded modules by repository
+    local loaded_by_repo = {}
+    local all_modules = self:getModuleList()
+    
     for id, module in pairs(self.modules) do
       local update_status = ""
       local cached_module = self.discovery_cache.modules[id]
@@ -2343,8 +2363,44 @@ function ModuleManager:listModules()
           update_status = " <yellow>(update available)<reset>"
         end
       end
-      cecho(string.format("  <SteelBlue>%s<reset> v%s - %s%s\n",
-        id, module.version or "?", module.name or "Unknown", update_status))
+      
+      -- Get repository information from cache or all_modules
+      local repo = "unknown"
+      if cached_module and cached_module.repository then
+        repo = cached_module.repository
+      elseif all_modules[id] and all_modules[id].repository then
+        repo = all_modules[id].repository
+      end
+      
+      loaded_by_repo[repo] = loaded_by_repo[repo] or {}
+      table.insert(loaded_by_repo[repo], {
+        id = id,
+        module = module,
+        update_status = update_status
+      })
+    end
+    
+    -- Sort repositories for consistent display
+    local repos = {}
+    for repo in pairs(loaded_by_repo) do
+      table.insert(repos, repo)
+    end
+    table.sort(repos)
+    
+    -- Display grouped by repository
+    for _, repo in ipairs(repos) do
+      local modules = loaded_by_repo[repo]
+      if #modules > 0 then
+        cecho(string.format("\n  <DimGrey>── %s ──<reset>\n", repo))
+        
+        -- Sort modules within repository
+        table.sort(modules, function(a, b) return a.id < b.id end)
+        
+        for _, entry in ipairs(modules) do
+          cecho(string.format("  <SteelBlue>%s<reset> v%s - %s%s\n",
+            entry.id, entry.module.version or "?", entry.module.name or "Unknown", entry.update_status))
+        end
+      end
     end
   else
     cecho("  <DimGrey>No additional modules loaded<reset>\n")
@@ -2603,7 +2659,7 @@ function ModuleManager:showHelp()
 
 <LightSteelBlue>Developer Commands:<reset>
   <SteelBlue>edev<reset>                     Show warning and instructions for developer modules
-  <SteelBlue>edev confirm<reset>             Load all modules from the emerge-dev repository
+  <SteelBlue>edev confirm<reset>             Enable developer modules for discovery (no auto-load)
 
 <DimGrey>Configuration: ]] .. self.paths.config .. [[<reset>
 ]])
