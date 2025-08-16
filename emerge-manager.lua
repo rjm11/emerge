@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.7.5
+-- Version: 0.7.7
 
-local CURRENT_VERSION = "0.7.5"
+local CURRENT_VERSION = "0.7.7"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -77,7 +77,7 @@ ModuleManager.paths = {
 }
 
 -- Default module registry - empty until modules are actually created
--- Modules can be added via 'emodule github' command
+-- Modules can be added via 'emod github' command
 ModuleManager.default_registry = {}
 
 -- Multi-repository configuration
@@ -186,6 +186,32 @@ function ModuleManager:saveConfig()
   end
 end
 
+-- Save discovery cache
+function ModuleManager:saveDiscoveryCache()
+  local cache_file = self.paths.cache .. "/discovery_cache.json"
+  local file = io.open(cache_file, "w")
+  if file then
+    file:write(yajl.to_string(self.discovery_cache))
+    file:close()
+  end
+end
+
+-- Load discovery cache
+function ModuleManager:loadDiscoveryCache()
+  local cache_file = self.paths.cache .. "/discovery_cache.json"
+  if io.exists(cache_file) then
+    local file = io.open(cache_file, "r")
+    if file then
+      local content = file:read("*all")
+      file:close()
+      local ok, cache = pcall(yajl.to_value, content)
+      if ok and cache then
+        self.discovery_cache = cache
+      end
+    end
+  end
+end
+
 -- Save custom modules
 function ModuleManager:saveCustomModules()
   local file = io.open(self.paths.custom, "w")
@@ -283,7 +309,7 @@ end
 -- Add module from GitHub URL
 function ModuleManager:addGitHub(github_url)
   if not github_url or github_url == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule github <owner/repo or github.com/owner/repo><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod github <owner/repo or github.com/owner/repo><reset>\n")
     return
   end
 
@@ -393,7 +419,7 @@ end
 -- Remove custom module
 function ModuleManager:removeModule(module_id)
   if not module_id or module_id == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule remove <module_id><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod remove <module_id><reset>\n")
     return
   end
 
@@ -430,7 +456,7 @@ end
 function ModuleManager:toggleModule(module_id, enabled)
   if not module_id or module_id == "" then
     local cmd = enabled and "enable" or "disable"
-    cecho(string.format("<IndianRed>[EMERGE] Usage: emodule %s <module_id><reset>\n", cmd))
+    cecho(string.format("<IndianRed>[EMERGE] Usage: emod %s <module_id><reset>\n", cmd))
     return
   end
 
@@ -561,8 +587,8 @@ end
 -- Load a module from GitHub
 function ModuleManager:loadModule(module_id, custom_branch)
   if not module_id or module_id == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule load <module_id><reset>\n")
-    cecho("<DimGrey>Or: emodule load <branch> <module_id><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod load <module_id><reset>\n")
+    cecho("<DimGrey>Or: emod load <branch> <module_id><reset>\n")
     return
   end
 
@@ -605,24 +631,46 @@ function ModuleManager:loadModule(module_id, custom_branch)
       EMERGE.aliases.emerge_overwrite_confirm = nil
       EMERGE.aliases.emerge_overwrite_cancel = nil
       EMERGE.overwrite_in_progress = false
+      if EMERGE.overwrite_timeout then
+        killTimer(EMERGE.overwrite_timeout)
+        EMERGE.overwrite_timeout = nil
+      end
       EMERGE:_processOverwriteQueue()
     ]])
 
-    self.aliases[cancel_alias] = tempAlias("^(.*)$", [[
-      if matches[2] ~= "yes" then
+    self.aliases[cancel_alias] = tempAlias("^(no)$", [[
+      local pending = EMERGE.pending_overwrite
+      if pending then
+        cecho(string.format("<IndianRed>[EMERGE] Aborted overwriting module '%s'.<reset>\n", pending.module_id))
+        EMERGE.pending_overwrite = nil
+      end
+      killAlias(EMERGE.aliases.emerge_overwrite_confirm)
+      killAlias(EMERGE.aliases.emerge_overwrite_cancel)
+      EMERGE.aliases.emerge_overwrite_confirm = nil
+      EMERGE.aliases.emerge_overwrite_cancel = nil
+      EMERGE.overwrite_in_progress = false
+      if EMERGE.overwrite_timeout then
+        killTimer(EMERGE.overwrite_timeout)
+        EMERGE.overwrite_timeout = nil
+      end
+      EMERGE:_processOverwriteQueue()
+    ]])
+
+    -- Add timeout to automatically cancel after 30 seconds
+    self.overwrite_timeout = tempTimer(30, function()
+      if EMERGE.pending_overwrite then
         local pending = EMERGE.pending_overwrite
-        if pending then
-          cecho(string.format("<IndianRed>[EMERGE] Aborted overwriting module '%s'.<reset>\n", pending.module_id))
-          EMERGE.pending_overwrite = nil
-        end
-        killAlias(EMERGE.aliases.emerge_overwrite_confirm)
-        killAlias(EMERGE.aliases.emerge_overwrite_cancel)
+        cecho(string.format("<DimGrey>[EMERGE] Overwrite prompt timed out for '%s'.<reset>\n", pending.module_id))
+        EMERGE.pending_overwrite = nil
+        if EMERGE.aliases.emerge_overwrite_confirm then killAlias(EMERGE.aliases.emerge_overwrite_confirm) end
+        if EMERGE.aliases.emerge_overwrite_cancel then killAlias(EMERGE.aliases.emerge_overwrite_cancel) end
         EMERGE.aliases.emerge_overwrite_confirm = nil
         EMERGE.aliases.emerge_overwrite_cancel = nil
         EMERGE.overwrite_in_progress = false
+        EMERGE.overwrite_timeout = nil
         EMERGE:_processOverwriteQueue()
       end
-    ]])
+    end)
 
     return
   end
@@ -666,8 +714,8 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
 
   if not module_info then
     cecho(string.format("<IndianRed>[EMERGE] Unknown module: %s<reset>\n", module_id))
-    cecho("<DimGrey>Try 'emodule list' to see available modules<reset>\n")
-    cecho("<DimGrey>Or 'emodule refresh' to update module list<reset>\n")
+    cecho("<DimGrey>Try 'emod list' to see available modules<reset>\n")
+    cecho("<DimGrey>Or 'emod refresh' to update module list<reset>\n")
     return
   end
 
@@ -738,7 +786,16 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
     cecho(string.format("<DimGrey>[DEBUG] Download URL: %s<reset>\n", url))
   end
 
-  cecho(string.format("<DarkOrange>[EMERGE] Downloading %s...<reset>\n", module_id))
+  -- Check if we have a cached version
+  local cache_file = self.paths.cache .. module_id .. ".lua"
+  local cache_exists = io.exists(cache_file)
+  local repo_name = module_info.github and (module_info.github.owner .. "/" .. module_info.github.repo) or "unknown"
+  
+  if cache_exists then
+    cecho(string.format("<DarkOrange>[EMERGE] Downloading %s from %s (updating cache)...<reset>\n", module_id, repo_name))
+  else
+    cecho(string.format("<DarkOrange>[EMERGE] Downloading %s from %s...<reset>\n", module_id, repo_name))
+  end
 
   local headers = {}
   if self.config.github_token then
@@ -768,7 +825,7 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
         if self.handlers.download_success ~= nil then killAnonymousEventHandler(self.handlers.download_success) end
         if self.handlers.download_error ~= nil then killAnonymousEventHandler(self.handlers.download_error) end
 
-        cecho(string.format("<LightSteelBlue>[EMERGE] Downloaded %s<reset>\n", module_id))
+        cecho(string.format("<LightSteelBlue>[EMERGE] Downloaded %s from %s<reset>\n", module_id, repo_name))
 
         local cache_file = self.paths.cache .. module_id .. ".lua"
         local file = io.open(cache_file, "w")
@@ -865,8 +922,8 @@ end
 function ModuleManager:unloadModule(module_id, confirm)
   local _killScript = rawget(_G, "killScript") or function(...) end
   if not module_id or module_id == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule unload <module_id><reset>\n")
-    cecho("<DimGrey>To unload EMERGE itself: emodule unload manager confirm<reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod unload <module_id><reset>\n")
+    cecho("<DimGrey>To unload EMERGE itself: emod unload manager confirm<reset>\n")
     return
   end
 
@@ -876,7 +933,7 @@ function ModuleManager:unloadModule(module_id, confirm)
     if confirm ~= "confirm" then
       cecho("<IndianRed>WARNING: This will completely remove EMERGE from Mudlet!<reset>\n")
       cecho("<DarkOrange>You will need to reinstall using the one-line installer.<reset>\n")
-      cecho("<LightSteelBlue>To confirm, type: emodule unload manager confirm<reset>\n")
+      cecho("<LightSteelBlue>To confirm, type: emod unload manager confirm<reset>\n")
       return
     end
 
@@ -1183,9 +1240,9 @@ function ModuleManager:_evaluateUpdateResults(completion_state, was_silent)
     end
 
     cecho("\n<DimGrey>Commands:<reset>\n")
-    cecho("<DimGrey>  emodule upgrade manager  # Update the manager<reset>\n")
-    cecho("<DimGrey>  emodule upgrade <module> # Update a specific module<reset>\n")
-    cecho("<DimGrey>  emodule upgrade all      # Update everything<reset>\n")
+    cecho("<DimGrey>  emod upgrade manager  # Update the manager<reset>\n")
+    cecho("<DimGrey>  emod upgrade <module> # Update a specific module<reset>\n")
+    cecho("<DimGrey>  emod upgrade all      # Update everything<reset>\n")
   else
     cecho("<LightSteelBlue>[EMERGE] All components are up to date<reset>\n")
   end
@@ -1206,7 +1263,7 @@ function ModuleManager:checkSelfUpdate()
   -- Delegate to the new async version for consistency
   self:checkSelfUpdateAsync(function(update_available)
     if update_available then
-      cecho("<SteelBlue>Run 'emodule upgrade manager' to update<reset>\n")
+      cecho("<SteelBlue>Run 'emod upgrade manager' to update<reset>\n")
     end
   end)
 end
@@ -1214,7 +1271,7 @@ end
 -- Upgrade modules or manager
 function ModuleManager:upgradeComponent(component, force)
   if not component or component == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <manager|module|all><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod upgrade <manager|module|all><reset>\n")
     return
   end
 
@@ -1263,7 +1320,7 @@ end
 -- Upgrade a specific module
 function ModuleManager:upgradeModule(module_id, force)
   if not module_id or module_id == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <module><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod upgrade <module><reset>\n")
     return
   end
 
@@ -1528,6 +1585,9 @@ function ModuleManager:discoverRepositories()
         if completed_downloads >= pending_downloads then
           self.discovery_cache.modules = discovered_modules
           self.discovery_cache.last_refresh = os.time()
+          
+          -- Save the discovery cache to disk
+          self:saveDiscoveryCache()
 
           local total_modules = tsize(discovered_modules)
           cecho(string.format("<LightSteelBlue>[EMERGE] Discovery complete: %d modules available<reset>\n",
@@ -1751,14 +1811,14 @@ function ModuleManager:listRepositories()
     cecho(string.format("<DimGrey>Cached modules: %d (updated %d minutes ago)<reset>\n",
       cached_count, math.floor(cache_age / 60)))
   else
-    cecho("<DimGrey>No cached modules. Run 'emodule refresh' to discover.<reset>\n")
+    cecho("<DimGrey>No cached modules. Run 'emod refresh' to discover.<reset>\n")
   end
 end
 
 -- Search available modules
 function ModuleManager:searchModules(search_term)
   if not search_term or search_term == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule search <term><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod search <term><reset>\n")
     return
   end
 
@@ -1837,7 +1897,7 @@ end
 -- Search all repositories (including dev) regardless of visibility
 function ModuleManager:searchModulesAll(search_term)
   if not search_term or search_term == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule searchall <term><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod searchall <term><reset>\n")
     return
   end
 
@@ -1899,7 +1959,7 @@ end
 -- Show detailed module information
 function ModuleManager:showModuleInfo(module_id)
   if not module_id or module_id == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule info <module_id><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod info <module_id><reset>\n")
     return
   end
 
@@ -1967,7 +2027,7 @@ function ModuleManager:showModuleInfo(module_id)
   if self.modules[module_id] then
     cecho(string.format("\n<green>Status: Loaded<reset>\n"))
   else
-    cecho(string.format("\n<DimGrey>Status: Available (use 'emodule load %s')<reset>\n", module_id))
+    cecho(string.format("\n<DimGrey>Status: Available (use 'emod load %s')<reset>\n", module_id))
   end
 end
 
@@ -2059,7 +2119,7 @@ function ModuleManager:setGitHubToken(token)
   if not token or token == "" then
     if self.config.github_token and self.config.github_token ~= "" then
       cecho("<LightSteelBlue>[EMERGE] GitHub token is set (masked).<reset>\n")
-      cecho("<DimGrey>Use 'emodule token <new_token>' to replace, or 'emodule token clear' to remove.<reset>\n")
+      cecho("<DimGrey>Use 'emod token <new_token>' to replace, or 'emod token clear' to remove.<reset>\n")
       return
     end
     cecho("<DarkOrange>[EMERGE] GitHub Token Setup<reset>\n\n")
@@ -2080,7 +2140,7 @@ function ModuleManager:setGitHubToken(token)
     cecho("     - Click dropdown and select 'Read'\n")
     cecho("  7. Scroll to bottom, click 'Generate token'\n")
     cecho("  8. Copy the token that starts with 'github_pat_'\n\n")
-    cecho("<SteelBlue>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
+    cecho("<SteelBlue>Then run: emod token YOUR_TOKEN_HERE<reset>\n")
     return
   end
 
@@ -2115,7 +2175,7 @@ function ModuleManager:setGitHubToken(token)
 
     if private_modules_found then
       cecho("<green>[EMERGE] ✓ Successfully connected to private repositories<reset>\n")
-      cecho("<DimGrey>Use 'emodule list' to see available modules<reset>\n")
+      cecho("<DimGrey>Use 'emod list' to see available modules<reset>\n")
     else
       cecho("<yellow>[EMERGE] ⚠ Token saved but could not access private repositories<reset>\n")
       cecho("<DimGrey>Please verify your token has 'repo' scope permissions<reset>\n")
@@ -2182,8 +2242,8 @@ function ModuleManager:_executeLoadDevModules()
       end
       
       cecho(string.format("<LightSteelBlue>[EMERGE] Found %d developer modules in discovery cache.<reset>\n", added_count))
-      cecho("<DimGrey>Use 'emodule list' to see available modules.<reset>\n")
-      cecho("<DimGrey>Use 'emodule load <module>' to load specific modules.<reset>\n")
+      cecho("<DimGrey>Use 'emod list' to see available modules.<reset>\n")
+      cecho("<DimGrey>Use 'emod load <module>' to load specific modules.<reset>\n")
       
       -- Save the updated discovery cache
       self:saveDiscoveryCache()
@@ -2204,8 +2264,8 @@ function ModuleManager:createAliases()
   self.aliases = {}
 
   -- Module management commands
-  self.aliases.list = tempAlias("^emodule list$", [[EMERGE:listModules()]])
-  self.aliases.load = tempAlias("^emodule load (.+)$", [[
+  self.aliases.list = tempAlias("^emod list$", [[EMERGE:listModules()]])
+  self.aliases.load = tempAlias("^emod load (.+)$", [[
     local args = matches[2]
     if args == "required" then
       EMERGE:loadRequiredModules()
@@ -2233,40 +2293,40 @@ function ModuleManager:createAliases()
       end
     end
   ]])
-  self.aliases.unload = tempAlias("^emodule unload ([^ ]+)$", [[EMERGE:unloadModule(matches[2])]])
-  self.aliases.unload_confirm = tempAlias("^emodule unload ([^ ]+) (.+)$",
+  self.aliases.unload = tempAlias("^emod unload ([^ ]+)$", [[EMERGE:unloadModule(matches[2])]])
+  self.aliases.unload_confirm = tempAlias("^emod unload ([^ ]+) (.+)$",
     [[EMERGE:unloadModule(matches[2], matches[3])]])
-  self.aliases.github = tempAlias("^emodule github (.+)$", [[
+  self.aliases.github = tempAlias("^emod github (.+)$", [[
     if matches[2] == "help" then
       EMERGE:showGitHubHelp()
     else
       EMERGE:addGitHub(matches[2])
     end
   ]])
-  self.aliases.add = tempAlias("^emodule add ([^ ]+) (.+)$", [[EMERGE:addModuleCommand(matches[2], matches[3])]])
-  self.aliases.remove = tempAlias("^emodule remove (.+)$", [[EMERGE:removeModule(matches[2])]])
-  self.aliases.enable = tempAlias("^emodule enable (.+)$", [[EMERGE:toggleModule(matches[2], true)]])
-  self.aliases.disable = tempAlias("^emodule disable (.+)$", [[EMERGE:toggleModule(matches[2], false)]])
-  self.aliases.update = tempAlias("^emodule update$", [[EMERGE:checkAllUpdates()]])
-  self.aliases.update_registry = tempAlias("^emodule update registry$", [[EMERGE:updateRegistry()]])
-  self.aliases.upgrade = tempAlias("^emodule upgrade (.+)$", [[EMERGE:upgradeComponent(matches[2])]])
-  self.aliases.upgrade_short = tempAlias("^emodule upgrade$", [[
-    cecho("<IndianRed>[EMERGE] Usage: emodule upgrade <manager|module|all><reset>\n")
+  self.aliases.add = tempAlias("^emod add ([^ ]+) (.+)$", [[EMERGE:addModuleCommand(matches[2], matches[3])]])
+  self.aliases.remove = tempAlias("^emod remove (.+)$", [[EMERGE:removeModule(matches[2])]])
+  self.aliases.enable = tempAlias("^emod enable (.+)$", [[EMERGE:toggleModule(matches[2], true)]])
+  self.aliases.disable = tempAlias("^emod disable (.+)$", [[EMERGE:toggleModule(matches[2], false)]])
+  self.aliases.update = tempAlias("^emod update$", [[EMERGE:checkAllUpdates()]])
+  self.aliases.update_registry = tempAlias("^emod update registry$", [[EMERGE:updateRegistry()]])
+  self.aliases.upgrade = tempAlias("^emod upgrade (.+)$", [[EMERGE:upgradeComponent(matches[2])]])
+  self.aliases.upgrade_short = tempAlias("^emod upgrade$", [[
+    cecho("<IndianRed>[EMERGE] Usage: emod upgrade <manager|module|all><reset>\n")
     cecho("<DimGrey>Examples:<reset>\n")
-    cecho("<DimGrey>  emodule upgrade manager      # Update the manager only<reset>\n")
-    cecho("<DimGrey>  emodule upgrade emerge-core  # Update a specific module<reset>\n")
-    cecho("<DimGrey>  emodule upgrade all          # Update everything<reset>\n")
+    cecho("<DimGrey>  emod upgrade manager      # Update the manager only<reset>\n")
+    cecho("<DimGrey>  emod upgrade emerge-core  # Update a specific module<reset>\n")
+    cecho("<DimGrey>  emod upgrade all          # Update everything<reset>\n")
   ]])
-  self.aliases.upgrade_force = tempAlias("^emodule upgrade (.+) force$", [[EMERGE:upgradeComponent(matches[2], true)]])
-  self.aliases.config = tempAlias("^emodule config$", [[EMERGE:showConfig()]])
-  self.aliases.token = tempAlias("^emodule token (.+)$", [[EMERGE:setGitHubToken(matches[2])]])
-  self.aliases.token_help = tempAlias("^emodule token$", [[EMERGE:setGitHubToken()]])
-  self.aliases.intro = tempAlias("^emodule intro$", [[EMERGE:showIntroduction()]])
-  self.aliases.help = tempAlias("^emodule help$", [[EMERGE:showHelp()]])
-  self.aliases.help_short = tempAlias("^emodule$", [[EMERGE:showHelp()]])
-  self.aliases.install = tempAlias("^emodule install$", [[EMERGE:manualInstall()]])
-  self.aliases.status = tempAlias("^emodule status$", [[EMERGE:checkStatus()]])
-  self.aliases.reload = tempAlias("^emodule reload$", [[
+  self.aliases.upgrade_force = tempAlias("^emod upgrade (.+) force$", [[EMERGE:upgradeComponent(matches[2], true)]])
+  self.aliases.config = tempAlias("^emod config$", [[EMERGE:showConfig()]])
+  self.aliases.token = tempAlias("^emod token (.+)$", [[EMERGE:setGitHubToken(matches[2])]])
+  self.aliases.token_help = tempAlias("^emod token$", [[EMERGE:setGitHubToken()]])
+  self.aliases.intro = tempAlias("^emod intro$", [[EMERGE:showIntroduction()]])
+  self.aliases.help = tempAlias("^emod help$", [[EMERGE:showHelp()]])
+  self.aliases.help_short = tempAlias("^emod$", [[EMERGE:showHelp()]])
+  self.aliases.install = tempAlias("^emod install$", [[EMERGE:manualInstall()]])
+  self.aliases.status = tempAlias("^emod status$", [[EMERGE:checkStatus()]])
+  self.aliases.reload = tempAlias("^emod reload$", [[
     cecho("<DimGrey>[EMERGE] Reloading manager from disk...<reset>\n")
     -- Try project directory first, then fall back to profile directory
     local f = getMudletHomeDir() .. "/../Projects/emerge-dev/emerge-dev/emerge-manager.lua"
@@ -2302,12 +2362,12 @@ function ModuleManager:createAliases()
   self.aliases.edev_off = tempAlias("^edev off$", [[EMERGE:hideDevModules()]])
 
   -- New discovery commands
-  self.aliases.refresh = tempAlias("^emodule refresh$", [[EMERGE:refreshCache(true)]])
-  self.aliases.repos = tempAlias("^emodule repos$", [[EMERGE:listRepositories()]])
-  self.aliases.search = tempAlias("^emodule search (.+)$", [[EMERGE:searchModules(matches[2])]])
-  self.aliases.searchall = tempAlias("^emodule searchall (.+)$", [[EMERGE:searchModulesAll(matches[2])]])
-  self.aliases.info = tempAlias("^emodule info (.+)$", [[EMERGE:showModuleInfo(matches[2])]])
-  self.aliases.debug = tempAlias("^emodule debug$", [[EMERGE:toggleDebug()]])
+  self.aliases.refresh = tempAlias("^emod refresh$", [[EMERGE:refreshCache(true)]])
+  self.aliases.repos = tempAlias("^emod repos$", [[EMERGE:listRepositories()]])
+  self.aliases.search = tempAlias("^emod search (.+)$", [[EMERGE:searchModules(matches[2])]])
+  self.aliases.searchall = tempAlias("^emod searchall (.+)$", [[EMERGE:searchModulesAll(matches[2])]])
+  self.aliases.info = tempAlias("^emod info (.+)$", [[EMERGE:showModuleInfo(matches[2])]])
+  self.aliases.debug = tempAlias("^emod debug$", [[EMERGE:toggleDebug()]])
 end
 
 -- Toggle debug mode
@@ -2482,7 +2542,7 @@ function ModuleManager:listModules()
       end
     end
 
-    cecho("\n  <SlateGray>💡 <LightBlue>Quick start: <SteelBlue>emodule load required<reset>\n")
+    cecho("\n  <SlateGray>💡 <LightBlue>Quick start: <SteelBlue>emod load required<reset>\n")
   end
 
   -- Count total optional modules
@@ -2528,17 +2588,17 @@ function ModuleManager:listModules()
 
   if total_required == 0 and total_optional == 0 then
     cecho("\n<DimGrey>No additional modules available<reset>\n")
-    cecho("<DimGrey>Try 'emodule refresh' to update module list<reset>\n")
+    cecho("<DimGrey>Try 'emod refresh' to update module list<reset>\n")
   end
 
   -- Show helpful footer
   cecho(
     "\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
   cecho("<DimGrey>📋 Commands:<reset>\n")
-  cecho("  <SteelBlue>emodule load <module><reset>\n")
-  cecho("  <SteelBlue>emodule load <repo>/<module><reset>\n")
-  cecho("  <SteelBlue>emodule load <branch> <repo>/<module><reset>\n")
-  cecho("  <SteelBlue>emodule help<reset> <DimGrey>│<reset> <SteelBlue>emodule update<reset>\n")
+  cecho("  <SteelBlue>emod load <module><reset>\n")
+  cecho("  <SteelBlue>emod load <repo>/<module><reset>\n")
+  cecho("  <SteelBlue>emod load <branch> <repo>/<module><reset>\n")
+  cecho("  <SteelBlue>emod help<reset> <DimGrey>│<reset> <SteelBlue>emod update<reset>\n")
 
   -- Show cache status
   local cache_age = os.time() - self.discovery_cache.last_refresh
@@ -2588,12 +2648,12 @@ function ModuleManager:showGitHubHelp()
      Token looks like: <DimGrey>github_pat_xxxxxxxxxxxxxxxxxxxx<reset>
 
 <LightSteelBlue>Step 2: Add Token to EMERGE<reset>
-  Run: <SteelBlue>emodule token <your_token_here><reset>
-  Example: <DimGrey>emodule token github_pat_1234567890abcdef<reset>
+  Run: <SteelBlue>emod token <your_token_here><reset>
+  Example: <DimGrey>emod token github_pat_1234567890abcdef<reset>
 
 <LightSteelBlue>Step 3: Add Modules<reset>
-  Public repos:  <SteelBlue>emodule github owner/repository<reset>
-  Private repos: <SteelBlue>emodule github owner/private-repo<reset>
+  Public repos:  <SteelBlue>emod github owner/repository<reset>
+  Private repos: <SteelBlue>emod github owner/private-repo<reset>
 
 <LightSteelBlue>Security Notes:<reset>
   • Your token is stored locally in: <DimGrey>emerge-config.json<reset>
@@ -2606,7 +2666,7 @@ function ModuleManager:showGitHubHelp()
   • <DimGrey>"401 Unauthorized"<reset> - Token may be expired or invalid
   • <DimGrey>"Rate limit"<reset> - Wait an hour or use a token (increases limits)
 
-<DimGrey>Type 'emodule help' for all commands<reset>
+<DimGrey>Type 'emod help' for all commands<reset>
 ]])
 end
 
@@ -2624,38 +2684,38 @@ function ModuleManager:showHelp()
 <SlateGray>From simplicity, emerges victory<reset>
 
 <LightSteelBlue>Core Commands:<reset>
-  <SteelBlue>emodule list<reset>             List all modules (loaded & available)
-  <SteelBlue>emodule load <id><reset>        Download and load a module
-  <SteelBlue>emodule load <repo>/<id><reset> Load from a specific repository
-  <SteelBlue>emodule load <branch> <id><reset>  Load module from specific branch
-  <SteelBlue>emodule load <branch> <repo>/<id><reset>  Load from branch and repo
-  <SteelBlue>emodule load required<reset>    Load all required modules
-  <SteelBlue>emodule unload <id><reset>      Unload a loaded module
-  <SteelBlue>emodule enable <id><reset>      Enable a module for auto-loading
-  <SteelBlue>emodule disable <id><reset>     Disable a module
+  <SteelBlue>emod list<reset>             List all modules (loaded & available)
+  <SteelBlue>emod load <id><reset>        Download and load a module
+  <SteelBlue>emod load <repo>/<id><reset> Load from a specific repository
+  <SteelBlue>emod load <branch> <id><reset>  Load module from specific branch
+  <SteelBlue>emod load <branch> <repo>/<id><reset>  Load from branch and repo
+  <SteelBlue>emod load required<reset>    Load all required modules
+  <SteelBlue>emod unload <id><reset>      Unload a loaded module
+  <SteelBlue>emod enable <id><reset>      Enable a module for auto-loading
+  <SteelBlue>emod disable <id><reset>     Disable a module
 
 <LightSteelBlue>Discovery & Search:<reset>
-  <SteelBlue>emodule refresh<reset>          Force refresh module discovery cache
-  <SteelBlue>emodule repos<reset>            List configured repositories
-  <SteelBlue>emodule search <term><reset>    Search available modules
-  <SteelBlue>emodule info <id><reset>        Show detailed module information
+  <SteelBlue>emod refresh<reset>          Force refresh module discovery cache
+  <SteelBlue>emod repos<reset>            List configured repositories
+  <SteelBlue>emod search <term><reset>    Search available modules
+  <SteelBlue>emod info <id><reset>        Show detailed module information
 
 <LightSteelBlue>System Management:<reset>
-  <SteelBlue>emodule unload manager confirm<reset>  Completely remove EMERGE
+  <SteelBlue>emod unload manager confirm<reset>  Completely remove EMERGE
 
 <LightSteelBlue>GitHub Integration:<reset>]] .. token_status .. [[
 
-  <SteelBlue>emodule github <url><reset>     Add module from GitHub repository
-  <SteelBlue>emodule remove <id><reset>      Remove a custom module
-  <SteelBlue>emodule token <token><reset>    Set GitHub token for private repos
+  <SteelBlue>emod github <url><reset>     Add module from GitHub repository
+  <SteelBlue>emod remove <id><reset>      Remove a custom module
+  <SteelBlue>emod token <token><reset>    Set GitHub token for private repos
 
 <LightSteelBlue>Update Commands:<reset>
-  <SteelBlue>emodule update<reset>           Check all components for updates
-  <SteelBlue>emodule upgrade <target><reset> Upgrade manager/module/all
+  <SteelBlue>emod update<reset>           Check all components for updates
+  <SteelBlue>emod upgrade <target><reset> Upgrade manager/module/all
 
 <LightSteelBlue>Other Commands:<reset>
-  <SteelBlue>emodule config<reset>           Show current configuration
-  <SteelBlue>emodule help<reset>             Show this help (or just 'emodule')
+  <SteelBlue>emod config<reset>           Show current configuration
+  <SteelBlue>emod help<reset>             Show this help (or just 'emod')
 
 <LightSteelBlue>Developer Commands:<reset>
   <SteelBlue>edev<reset>                     Show warning and instructions for developer modules
@@ -2668,7 +2728,7 @@ end
 -- Add module via command
 function ModuleManager:addModuleCommand(id, json_str)
   if not id or id == "" or not json_str or json_str == "" then
-    cecho("<IndianRed>[EMERGE] Usage: emodule add <id> <json_config><reset>\n")
+    cecho("<IndianRed>[EMERGE] Usage: emod add <id> <json_config><reset>\n")
     return
   end
 
@@ -2678,7 +2738,7 @@ function ModuleManager:addModuleCommand(id, json_str)
   else
     cecho("<IndianRed>[EMERGE] Invalid JSON format<reset>\n")
     cecho(
-      "<DimGrey>Example: emodule add mymod {\"name\":\"My Module\",\"github\":{\"owner\":\"me\",\"repo\":\"my-mod\",\"file\":\"mod.lua\"}}<reset>\n")
+      "<DimGrey>Example: emod add mymod {\"name\":\"My Module\",\"github\":{\"owner\":\"me\",\"repo\":\"my-mod\",\"file\":\"mod.lua\"}}<reset>\n")
   end
 end
 
@@ -2745,8 +2805,8 @@ function ModuleManager:checkCoreModules()
   cecho("<green>✓ System Ready<reset>\n")
   cecho("<SlateGray>──────────────────────────────────────<reset>\n\n")
   cecho("<LightSteelBlue>Quick Start:<reset>\n")
-  cecho("  <SteelBlue>emodule help<reset>         - View all commands\n")
-  cecho("  <SteelBlue>emodule list<reset>         - See available modules\n\n")
+  cecho("  <SteelBlue>emod help<reset>         - View all commands\n")
+  cecho("  <SteelBlue>emod list<reset>         - See available modules\n\n")
 
   -- Check if token is set
   if not self.config.github_token or self.config.github_token == "" then
@@ -2755,15 +2815,15 @@ function ModuleManager:checkCoreModules()
     cechoLink("github.com/settings/tokens", [[openUrl("https://github.com/settings/tokens")]],
       "Click to open GitHub tokens page")
     cecho("<reset>\n")
-    cecho("  <DimGrey>2. Set your token: <SteelBlue>emodule token <token><reset>\n")
-    cecho("  <DimGrey>3. Need help? <SteelBlue>emodule github help<reset>\n\n")
+    cecho("  <DimGrey>2. Set your token: <SteelBlue>emod token <token><reset>\n")
+    cecho("  <DimGrey>3. Need help? <SteelBlue>emod github help<reset>\n\n")
     cecho("<DimGrey>Then add modules:<reset>\n")
   else
     cecho("<DimGrey>Add modules from GitHub:<reset>\n")
   end
 
-  cecho("  <DimGrey>emodule github <url><reset>\n")
-  cecho("  <DimGrey>emodule github <owner/repo><reset>\n\n")
+  cecho("  <DimGrey>emod github <url><reset>\n")
+  cecho("  <DimGrey>emod github <owner/repo><reset>\n\n")
   cecho("<DimGrey>Documentation: ")
   cechoLink("github.com/rjm11/emerge/wiki", [[openUrl("https://github.com/rjm11/emerge/wiki")]], "Click to open")
   cecho("<reset>\n")
@@ -2773,6 +2833,9 @@ end
 function ModuleManager:init()
   -- Load configuration
   self:loadConfig()
+  
+  -- Load discovery cache
+  self:loadDiscoveryCache()
 
   -- Create aliases
   self:createAliases()
@@ -2820,7 +2883,7 @@ function ModuleManager:init()
   table.insert(self.init_timers, t4)
 
   -- Schedule update check (DISABLED - only manual updates)
-  -- Automatic updates disabled - use 'emodule update' for manual checking
+  -- Automatic updates disabled - use 'emod update' for manual checking
   -- if self.config.auto_update then
   --   tempTimer(40, function()
   --     if EMERGE and EMERGE.loaded then
@@ -3085,7 +3148,7 @@ function ModuleManager:checkStatus()
   end
 
   cecho("\n<LightSteelBlue>To ensure persistence:<reset>\n")
-  cecho("1. Type: <yellow>emodule install<reset>\n")
+  cecho("1. Type: <yellow>emod install<reset>\n")
   cecho("2. Open Script Editor (Alt+E) and verify 'EMERGE' group exists\n")
   cecho("3. Save your profile (Ctrl+S)\n")
   cecho("4. Restart Mudlet to test persistence\n")
@@ -3163,7 +3226,7 @@ if not EMERGE_BOOTLOADER_ACTIVE then
 
   if not ok then
     cecho("<red>[EMERGE] Auto-install failed: " .. tostring(err) .. "<reset>\n")
-    cecho("<yellow>[EMERGE] Type 'emodule install' for manual setup<reset>\n")
+    cecho("<yellow>[EMERGE] Type 'emod install' for manual setup<reset>\n")
   end
 else
   -- Clear the bootloader flag
