@@ -1828,8 +1828,8 @@ function ModuleManager:searchModulesAll(search_term)
   -- Merge in dev manifest even if hidden
   local man = self.discovery_cache.manifests and self.discovery_cache.manifests["emerge-dev"]
   if man and man.modules then
-    for k, m in pairs(man.modules) do
-      local id = (m.id or m.name) or (m.github and m.github.file and tostring(m.github.file):match("([^/]+)%.lua$")) or k
+    for idx, m in pairs(man.modules) do
+      local id = (m.id or m.name) or (m.github and m.github.file and tostring(m.github.file):match("([^/]+)%.lua$"))
       if id and not combined[id] then
         m.repository = "emerge-dev"
         combined[id] = m
@@ -2139,9 +2139,17 @@ function ModuleManager:_executeLoadDevModules()
   self:downloadManifest(dev_repo, function(success, modules)
     if success and modules then
       -- First, update the discovery cache with the dev modules
-      for id, module_info in pairs(modules) do
-        module_info.repository = dev_repo.name
-        self.discovery_cache.modules[id] = module_info
+      for idx, module_info in pairs(modules) do
+        -- Extract proper module ID from module info
+        local module_id = module_info and (module_info.id or module_info.name)
+        if not module_id and module_info and module_info.github and module_info.github.file then
+          module_id = tostring(module_info.github.file):match("([^/]+)%.lua$")
+        end
+        
+        if module_id then
+          module_info.repository = dev_repo.name
+          self.discovery_cache.modules[module_id] = module_info
+        end
       end
 
       local module_count = tsize(modules)
@@ -2149,13 +2157,21 @@ function ModuleManager:_executeLoadDevModules()
         module_count))
 
       local i = 0
-      for id, module_info in pairs(modules) do
-        i = i + 1
-        -- Use a timer to load modules one by one
-        tempTimer(i * 0.5, function()
-          cecho(string.format("<DimGrey>[%d/%d] Loading %s...<reset>\n", i, module_count, id))
-          self:loadModule(id)
-        end)
+      for idx, module_info in pairs(modules) do
+        -- Extract proper module ID from module info
+        local module_id = module_info and (module_info.id or module_info.name)
+        if not module_id and module_info and module_info.github and module_info.github.file then
+          module_id = tostring(module_info.github.file):match("([^/]+)%.lua$")
+        end
+        
+        if module_id then
+          i = i + 1
+          -- Use a timer to load modules one by one
+          tempTimer(i * 0.5, function()
+            cecho(string.format("<DimGrey>[%d/%d] Loading %s...<reset>\n", i, module_count, module_id))
+            self:loadModule(module_id)
+          end)
+        end
       end
     else
       cecho(string.format("<red>[EMERGE] Failed to download manifest from %s.<reset>\n", dev_repo.name))
