@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.7.1
+-- Version: 0.7.4
 
-local CURRENT_VERSION = "0.7.1"
+local CURRENT_VERSION = "0.7.4"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -33,10 +33,13 @@ if EMERGE and EMERGE.loaded then
     end)
   else
     -- Already loaded - check if this is during initial setup
-    if not (EMERGE.installing or EMERGE.creating_bootloader) then
+    if not (EMERGE.installing or EMERGE.creating_bootloader or EMERGE._force_reload) then
       cecho("<DarkOrange>[EMERGE] Already loaded.<reset>\n")
     end
-    return
+    if not EMERGE._force_reload then
+      return
+    end
+    -- continue with forced reload
   end
 end
 
@@ -48,8 +51,9 @@ if not EMERGE.loaded then
   EMERGE.loaded = false
 end
 EMERGE.modules = EMERGE.modules or {}
-EMERGE.aliases = {}
-EMERGE.handlers = {}
+-- IMPORTANT: Don't reset aliases/handlers if they exist - we need to clean them up first!
+EMERGE.aliases = EMERGE.aliases or {}
+EMERGE.handlers = EMERGE.handlers or {}
 EMERGE.overwrite_queue = {}
 EMERGE.overwrite_in_progress = false
 EMERGE.loading_modules = EMERGE.loading_modules or {}
@@ -151,7 +155,8 @@ function ModuleManager:loadConfig()
       auto_update = true,
       update_interval = 3600, -- 1 hour
       auto_load_modules = true,
-      debug = false
+      debug = false,
+      show_dev_modules = false
     }
     self:saveConfig()
   end
@@ -783,9 +788,12 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
           end
 
           cecho(string.format("<DarkOrange>[EMERGE] Loading %s...<reset>\n", module_id))
+          self:_installResourceWrappers()
+          EMERGE._current_loading_module = module_id
           local chunk, load_err = loadfile(cache_file)
           if type(chunk) == "function" then
             local ok, err = pcall(chunk)
+            EMERGE._current_loading_module = nil
             if ok then
               cecho(string.format("<green>[EMERGE] Successfully loaded %s<reset>\n", module_id))
               self.modules[module_id] = module_info
@@ -922,11 +930,94 @@ function ModuleManager:unloadModule(module_id, confirm)
     if module.unload then
       module:unload()
     end
+    -- Cleanup any tracked resources created by this module
+    pcall(function() self:_cleanupResources(module_id) end)
     self.modules[module_id] = nil
     cecho(string.format("<DarkOrange>[EMERGE] Unloaded: %s<reset>\n", module_id))
   else
     cecho(string.format("<IndianRed>[EMERGE] Module not loaded: %s<reset>\n", module_id))
   end
+end
+
+-- Install wrappers to track module-created resources (aliases, timers, handlers, triggers)
+function ModuleManager:_installResourceWrappers()
+  if EMERGE and EMERGE._wrappers_installed then return end
+  EMERGE = EMERGE or {}
+  EMERGE._wrappers_installed = true
+
+  EMERGE._orig = EMERGE._orig or {}
+  local orig = EMERGE._orig
+
+  -- Preserve originals
+  orig.tempAlias = orig.tempAlias or tempAlias
+  orig.tempTimer = orig.tempTimer or tempTimer
+  orig.registerAnonymousEventHandler = orig.registerAnonymousEventHandler or registerAnonymousEventHandler
+  if _G.tempTrigger then
+    orig.tempTrigger = orig.tempTrigger or tempTrigger
+  end
+
+  EMERGE._resource_registry = EMERGE._resource_registry or {
+    alias = {},
+    timer = {},
+    handler = {},
+    trigger = {},
+  }
+
+  function EMERGE:_track(kind, id)
+    local mid = EMERGE._current_loading_module
+    if not mid or not id then return end
+    local bucket = EMERGE._resource_registry[kind]
+    if not bucket[mid] then bucket[mid] = {} end
+    table.insert(bucket[mid], id)
+  end
+
+  _G.tempAlias = function(pattern, code)
+    local id = orig.tempAlias(pattern, code)
+    EMERGE:_track("alias", id)
+    return id
+  end
+
+  _G.tempTimer = function(time, funcOrCode)
+    local id = orig.tempTimer(time, funcOrCode)
+    EMERGE:_track("timer", id)
+    return id
+  end
+
+  _G.registerAnonymousEventHandler = function(event, func, oneshot)
+    local id = orig.registerAnonymousEventHandler(event, func, oneshot)
+    EMERGE:_track("handler", id)
+    return id
+  end
+
+  if orig.tempTrigger then
+    _G.tempTrigger = function(a, b, c, d, e, f, g)
+      local id = orig.tempTrigger(a, b, c, d, e, f, g)
+      EMERGE:_track("trigger", id)
+      return id
+    end
+  end
+end
+
+-- Cleanup any tracked resources created by a module
+function ModuleManager:_cleanupResources(module_id)
+  if not EMERGE or not EMERGE._resource_registry then return end
+  local reg = EMERGE._resource_registry
+
+  local list = reg.alias[module_id] or {}
+  for _, id in ipairs(list) do pcall(function() killAlias(id) end) end
+  reg.alias[module_id] = nil
+
+  list = reg.trigger[module_id] or {}
+  for _, id in ipairs(list) do pcall(function() killTrigger(id) end) end
+  reg.trigger[module_id] = nil
+
+  list = reg.timer[module_id] or {}
+  for _, id in ipairs(list) do pcall(function() killTimer(id) end) end
+  reg.timer[module_id] = nil
+
+  list = reg.handler[module_id] or {}
+  for _, id in ipairs(list) do pcall(function() killAnonymousEventHandler(id) end) end
+  reg.handler[module_id] = nil
 end
 
 -- Check all modules for updates (with proper async coordination)
@@ -1353,8 +1444,13 @@ function ModuleManager:discoverRepositories()
   cecho("<DarkOrange>[EMERGE] Discovering modules from repositories...<reset>\n")
 
   for _, repo_config in ipairs(self.repositories) do
-    -- Skip private repos if no token is set
-    if repo_config.requires_token and not self.config.github_token then
+    -- Skip dev-only repos unless explicitly enabled
+    if (repo_config.dev_only or repo_config.name == "emerge-dev") and not self.config.show_dev_modules then
+      if self.config.debug then
+        cecho(string.format("<DimGrey>[DEBUG] Skipping %s (dev-only hidden)<reset>\n", repo_config.name))
+      end
+      -- Skip private repos if no token is set
+    elseif repo_config.requires_token and not self.config.github_token then
       if self.config.debug then
         cecho(string.format("<DimGrey>[DEBUG] Skipping %s (no token)<reset>\n", repo_config.name))
       end
@@ -1367,22 +1463,26 @@ function ModuleManager:discoverRepositories()
         if success and modules then
           -- Add repository info to each module
           for idx, module_info in pairs(modules) do
-            -- FIX: Use module name as key, not array index
-            local module_id = module_info.name or module_info.id or idx
-
-            module_info.repository = repo_config.name
-            module_info.github = module_info.github or {
-              owner = repo_config.owner,
-              repo = repo_config.repo,
-              branch = repo_config.branch
-            }
-
-            -- Convert manifest 'path' field to 'manifest_path' for consistency
-            if module_info.path and not module_info.manifest_path then
-              module_info.manifest_path = module_info.path
+            -- Normalize module id: prefer explicit id, then name, else basename of github.file
+            local module_id = module_info and (module_info.id or module_info.name)
+            if not module_id and module_info and module_info.github and module_info.github.file then
+              module_id = tostring(module_info.github.file):match("([^/]+)%.lua$")
             end
-
-            discovered_modules[module_id] = module_info
+            if module_id then
+              module_info.repository = repo_config.name
+              module_info.github = module_info.github or {
+                owner = repo_config.owner,
+                repo = repo_config.repo,
+                branch = repo_config.branch
+              }
+              -- Convert manifest 'path' field to 'manifest_path' for consistency
+              if module_info.path and not module_info.manifest_path then
+                module_info.manifest_path = module_info.path
+              end
+              discovered_modules[module_id] = module_info
+            elseif self.config.debug then
+              cecho("<yellow>[DEBUG] Skipping manifest entry without usable id/name/file<reset>\n")
+            end
           end
 
           cecho(string.format("<DimGrey>[EMERGE] Found %d modules in %s<reset>\n",
@@ -1711,6 +1811,68 @@ function ModuleManager:searchModules(search_term)
   end
 end
 
+-- Search all repositories (including dev) regardless of visibility
+function ModuleManager:searchModulesAll(search_term)
+  if not search_term or search_term == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emodule searchall <term><reset>\n")
+    return
+  end
+
+  -- Ensure we have up-to-date manifests
+  self:refreshCache(false)
+
+  -- Start with current list
+  local combined = {}
+  for id, info in pairs(self:getModuleList()) do combined[id] = info end
+
+  -- Merge in dev manifest even if hidden
+  local man = self.discovery_cache.manifests and self.discovery_cache.manifests["emerge-dev"]
+  if man and man.modules then
+    for k, m in pairs(man.modules) do
+      local id = (m.id or m.name) or (m.github and m.github.file and tostring(m.github.file):match("([^/]+)%.lua$")) or k
+      if id and not combined[id] then
+        m.repository = "emerge-dev"
+        combined[id] = m
+      end
+    end
+  end
+
+  -- Search
+  local matches = {}
+  local term_lower = search_term:lower()
+  for id, info in pairs(combined) do
+    local score = 0
+    if id:lower():find(term_lower) then score = score + 10 end
+    if info.name and info.name:lower():find(term_lower) then score = score + 8 end
+    if info.description and info.description:lower():find(term_lower) then score = score + 5 end
+    if info.author and info.author:lower():find(term_lower) then score = score + 3 end
+    if score > 0 then table.insert(matches, { id = id, info = info, score = score }) end
+  end
+  table.sort(matches, function(a, b) return a.score > b.score end)
+
+  cecho(string.format("\n<LightSteelBlue>Search (all repos) for '%s':<reset>\n\n", search_term))
+  if #matches == 0 then
+    cecho("<DimGrey>No modules found matching your search.<reset>\n")
+    return
+  end
+
+  for i, match in ipairs(matches) do
+    if i > 10 then
+      cecho(string.format("<DimGrey>... and %d more results<reset>\n", #matches - 10))
+      break
+    end
+    local id = match.id
+    local info = match.info
+    local status = self.modules[id] and " <green>(loaded)<reset>" or ""
+    cecho(string.format("<SteelBlue>%s<reset>%s\n", id, status))
+    if info.version then cecho(string.format("  Version: %s\n", info.version)) end
+    if info.name then cecho(string.format("  Name: %s\n", info.name)) end
+    if info.description then cecho(string.format("  Description: %s\n", info.description)) end
+    if info.repository then cecho(string.format("  Repository: %s\n", info.repository)) end
+    cecho("\n")
+  end
+end
+
 -- Show detailed module information
 function ModuleManager:showModuleInfo(module_id)
   if not module_id or module_id == "" then
@@ -1872,6 +2034,11 @@ end
 -- Set GitHub token for private repositories
 function ModuleManager:setGitHubToken(token)
   if not token or token == "" then
+    if self.config.github_token and self.config.github_token ~= "" then
+      cecho("<LightSteelBlue>[EMERGE] GitHub token is set (masked).<reset>\n")
+      cecho("<DimGrey>Use 'emodule token <new_token>' to replace, or 'emodule token clear' to remove.<reset>\n")
+      return
+    end
     cecho("<DarkOrange>[EMERGE] GitHub Token Setup<reset>\n\n")
     cecho("<LightSteelBlue>To create a GitHub personal access token:<reset>\n")
     cecho("  1. Go to ")
@@ -1891,6 +2058,13 @@ function ModuleManager:setGitHubToken(token)
     cecho("  7. Scroll to bottom, click 'Generate token'\n")
     cecho("  8. Copy the token that starts with 'github_pat_'\n\n")
     cecho("<SteelBlue>Then run: emodule token YOUR_TOKEN_HERE<reset>\n")
+    return
+  end
+
+  if token == "clear" then
+    self.config.github_token = ""
+    self:saveConfig()
+    cecho("<LightSteelBlue>[EMERGE] GitHub token cleared<reset>\n")
     return
   end
 
@@ -1932,6 +2106,15 @@ function ModuleManager:showDevModuleWarning()
     "<yellow>WARNING: This command will pull and install untested developer modules from the emerge-dev repository.<reset>\n")
   cecho("<yellow>These modules may be unstable and could cause issues.<reset>\n")
   cecho("<LightSteelBlue>To proceed, type: edev confirm<reset>\n")
+  cecho("<DimGrey>To hide developer modules again, type: edev off<reset>\n")
+end
+
+-- Hide developer modules
+function ModuleManager:hideDevModules()
+  self.config.show_dev_modules = false
+  self:saveConfig()
+  cecho("<LightSteelBlue>[EMERGE] Developer modules hidden<reset>\n")
+  self:refreshCache(true)
 end
 
 -- Execute loading of developer modules
@@ -2055,9 +2238,28 @@ function ModuleManager:createAliases()
   self.aliases.status = tempAlias("^emodule status$", [[EMERGE:checkStatus()]])
   self.aliases.reload = tempAlias("^emodule reload$", [[
     cecho("<DimGrey>[EMERGE] Reloading manager from disk...<reset>\n")
-    local f = getMudletHomeDir() .. "/emerge-manager.lua"
+    -- Try project directory first, then fall back to profile directory
+    local f = getMudletHomeDir() .. "/../Projects/emerge-dev/emerge-dev/emerge-manager.lua"
+    if not io.exists(f) then
+      f = getMudletHomeDir() .. "/emerge-manager.lua"
+    end
     if io.exists(f) then
+      -- Unload current manager instance (preserve loaded modules)
+      if EMERGE and EMERGE.unload then
+        EMERGE:unload(true)
+      end
+      EMERGE = EMERGE or {}
+      EMERGE._force_reload = true
+      -- Temporarily suppress "Already loaded" message
+      local original_cecho = cecho
+      cecho = function(msg)
+        if not string.find(msg, "Already loaded") then
+          original_cecho(msg)
+        end
+      end
       dofile(f)
+      cecho = original_cecho  -- Restore original cecho
+      EMERGE._force_reload = nil
       cecho("<LightSteelBlue>[EMERGE] Reloaded successfully<reset>\n")
     else
       cecho("<IndianRed>[EMERGE] Manager file not found<reset>\n")
@@ -2067,11 +2269,13 @@ function ModuleManager:createAliases()
   -- Developer commands
   self.aliases.edev = tempAlias("^edev$", [[EMERGE:showDevModuleWarning()]])
   self.aliases.edev_confirm = tempAlias("^edev confirm$", [[EMERGE:_executeLoadDevModules()]])
+  self.aliases.edev_off = tempAlias("^edev off$", [[EMERGE:hideDevModules()]])
 
   -- New discovery commands
   self.aliases.refresh = tempAlias("^emodule refresh$", [[EMERGE:refreshCache(true)]])
   self.aliases.repos = tempAlias("^emodule repos$", [[EMERGE:listRepositories()]])
   self.aliases.search = tempAlias("^emodule search (.+)$", [[EMERGE:searchModules(matches[2])]])
+  self.aliases.searchall = tempAlias("^emodule searchall (.+)$", [[EMERGE:searchModulesAll(matches[2])]])
   self.aliases.info = tempAlias("^emodule info (.+)$", [[EMERGE:showModuleInfo(matches[2])]])
   self.aliases.debug = tempAlias("^emodule debug$", [[EMERGE:toggleDebug()]])
 end
@@ -2258,8 +2462,11 @@ function ModuleManager:listModules()
   -- Show helpful footer
   cecho(
     "\n<SlateGray>════════════════════════════════════════════════════════════════════════════════════════════════════<reset>\n")
-  cecho(
-    "<DimGrey>📋 Commands: <SteelBlue>emodule load <module><reset> <DimGrey>│<reset> <SteelBlue>emodule load &lt;repo&gt;/&lt;module&gt;<reset> <DimGrey>│<reset> <SteelBlue>emodule load &lt;branch&gt; &lt;repo&gt;/&lt;module&gt;<reset> <DimGrey>│<reset> <SteelBlue>emodule help<reset> <DimGrey>│<reset> <SteelBlue>emodule update<reset>\n")
+  cecho("<DimGrey>📋 Commands:<reset>\n")
+  cecho("  <SteelBlue>emodule load <module><reset>\n")
+  cecho("  <SteelBlue>emodule load <repo>/<module><reset>\n")
+  cecho("  <SteelBlue>emodule load <branch> <repo>/<module><reset>\n")
+  cecho("  <SteelBlue>emodule help<reset> <DimGrey>│<reset> <SteelBlue>emodule update<reset>\n")
 
   -- Show cache status
   local cache_age = os.time() - self.discovery_cache.last_refresh
@@ -2497,16 +2704,22 @@ function ModuleManager:init()
 
   -- Create aliases
   self:createAliases()
+  -- Install wrappers to track resources created by modules
+  self:_installResourceWrappers()
+
+  -- Track init timers so we can cancel them on unload/reload
+  self.init_timers = {}
 
   -- Schedule bootup sequence (5 seconds after game login)
-  tempTimer(5, function()
+  local t1 = tempTimer(5, function()
     if EMERGE and EMERGE.loaded then
       EMERGE:showBootup()
     end
   end)
+  table.insert(self.init_timers, t1)
 
   -- Schedule discovery refresh (10 seconds after bootup)
-  tempTimer(10, function()
+  local t2 = tempTimer(10, function()
     if EMERGE and EMERGE.loaded then
       -- Only do discovery if we have a GitHub token for private repos
       if EMERGE.config.github_token and EMERGE.config.github_token ~= "" then
@@ -2516,20 +2729,23 @@ function ModuleManager:init()
       end
     end
   end)
+  table.insert(self.init_timers, t2)
 
   -- Schedule cache loading first (12 seconds after bootup)
-  tempTimer(12, function()
+  local t3 = tempTimer(12, function()
     if EMERGE and EMERGE.loaded then
       EMERGE:loadCachedModules()
     end
   end)
+  table.insert(self.init_timers, t3)
 
   -- Schedule auto-load after discovery
-  tempTimer(15, function()
+  local t4 = tempTimer(15, function()
     if EMERGE and EMERGE.loaded then
       EMERGE:autoLoadModules()
     end
   end)
+  table.insert(self.init_timers, t4)
 
   -- Schedule update check (DISABLED - only manual updates)
   -- Automatic updates disabled - use 'emodule update' for manual checking
@@ -2553,6 +2769,43 @@ function ModuleManager:unload(updating)
       killAlias(id)
     end
   end
+  
+  -- Clean up all event handlers
+  if self.handlers then
+    for _, handler_id in pairs(self.handlers) do
+      if handler_id then
+        pcall(function() killAnonymousEventHandler(handler_id) end)
+      end
+    end
+    self.handlers = {}
+  end
+  
+  -- Clean up any tracked resources from modules
+  if self.tracked_resources then
+    for module_id, resources in pairs(self.tracked_resources) do
+      if resources.handlers then
+        for _, id in ipairs(resources.handlers) do
+          pcall(function() killAnonymousEventHandler(id) end)
+        end
+      end
+      if resources.timers then
+        for _, id in ipairs(resources.timers) do
+          pcall(function() killTimer(id) end)
+        end
+      end
+      if resources.aliases then
+        for _, id in ipairs(resources.aliases) do
+          pcall(function() killAlias(id) end)
+        end
+      end
+      if resources.triggers then
+        for _, id in ipairs(resources.triggers) do
+          pcall(function() killTrigger(id) end)
+        end
+      end
+    end
+    self.tracked_resources = {}
+  end
 
   -- Don't unload modules if we're just updating the manager
   if not updating then
@@ -2562,6 +2815,14 @@ function ModuleManager:unload(updating)
       end
     end
     self.modules = {}
+  end
+
+  -- Cancel any scheduled init timers to prevent duplicate initialization on reload
+  if self.init_timers then
+    for _, tid in ipairs(self.init_timers) do
+      pcall(function() killTimer(tid) end)
+    end
+    self.init_timers = {}
   end
 
   self.loaded = false
@@ -2767,9 +3028,12 @@ function ModuleManager:loadFromCache(module_id)
 
   cecho(string.format("<DarkOrange>[EMERGE] Loading %s from cache...<reset>\n", module_id))
 
+  self:_installResourceWrappers()
+  EMERGE._current_loading_module = module_id
   local chunk, load_err = loadfile(cache_file)
   if type(chunk) == "function" then
     local ok, err = pcall(chunk)
+    EMERGE._current_loading_module = nil
     if ok then
       cecho(string.format("<green>[EMERGE] Successfully loaded %s from cache<reset>\n", module_id))
       return true
