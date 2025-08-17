@@ -1,8 +1,8 @@
 -- EMERGE: Emergent Modular Engagement & Response Generation Engine
 -- Self-updating module system with external configuration
--- Version: 0.7.7
+-- Version: 0.7.8
 
-local CURRENT_VERSION = "0.7.7"
+local CURRENT_VERSION = "0.7.8"
 local MANAGER_ID = "EMERGE"
 
 -- Check if already loaded and handle version updates
@@ -790,7 +790,7 @@ function ModuleManager:_executeLoadModule(module_id, custom_branch)
   local cache_file = self.paths.cache .. module_id .. ".lua"
   local cache_exists = io.exists(cache_file)
   local repo_name = module_info.github and (module_info.github.owner .. "/" .. module_info.github.repo) or "unknown"
-  
+
   if cache_exists then
     cecho(string.format("<DarkOrange>[EMERGE] Downloading %s from %s (updating cache)...<reset>\n", module_id, repo_name))
   else
@@ -1125,12 +1125,12 @@ function ModuleManager:checkSelfUpdateAsync(callback)
   if self.config.show_dev_modules then
     github_config = {
       owner = "robertmassey",
-      repo = "emerge-dev", 
+      repo = "emerge-dev",
       branch = "main",
       files = { manager = "emerge-manager.lua" }
     }
   end
-  
+
   local url = string.format("https://raw.githubusercontent.com/%s/%s/%s/%s",
     github_config.owner,
     github_config.repo,
@@ -1365,13 +1365,13 @@ function ModuleManager:upgradeSelf(force)
   -- Check for updates first if we don't have a pending update
   if not self.pending_update then
     cecho("<DimGrey>[EMERGE] Checking for updates...<reset>\n")
-    
+
     -- Use emerge-dev repo if dev mode is active, otherwise use main repo
     local github_config = self.github
     if self.config.show_dev_modules then
       github_config = {
         owner = "robertmassey",
-        repo = "emerge-dev", 
+        repo = "emerge-dev",
         branch = "main",
         files = { manager = "emerge-manager.lua" }
       }
@@ -1585,7 +1585,7 @@ function ModuleManager:discoverRepositories()
         if completed_downloads >= pending_downloads then
           self.discovery_cache.modules = discovered_modules
           self.discovery_cache.last_refresh = os.time()
-          
+
           -- Save the discovery cache to disk
           self:saveDiscoveryCache()
 
@@ -1816,6 +1816,73 @@ function ModuleManager:listRepositories()
 end
 
 -- Search available modules
+-- Add repository dynamically (config-backed)
+function ModuleManager:addRepository(name, owner, repo, branch, public, description, requires_token, dev_only)
+  if not name or not owner or not repo then
+    cecho("<IndianRed>[EMERGE] Usage: emod repo add <name> <owner>/<repo> [branch=main] [public|private]<reset>\n")
+    return
+  end
+  branch = branch or "main"
+  local pub
+  if type(public) == "string" then
+    pub = public:lower() ~= "private"
+  elseif type(public) == "boolean" then
+    pub = public
+  else
+    pub = true
+  end
+
+  local repos = self.config.repos or {}
+  for _, r in ipairs(repos) do
+    if r.name == name then
+      cecho(string.format("<yellow>[EMERGE] Repository '%s' already exists<reset>\n", name))
+      return
+    end
+  end
+
+  local entry = {
+    name = name,
+    owner = owner,
+    repo = repo,
+    branch = branch,
+    public = pub,
+    description = description or "",
+    requires_token = (pub == false) or requires_token or false,
+    dev_only = dev_only or false
+  }
+  table.insert(repos, entry)
+  self.config.repos = repos
+  self.repositories = repos
+  self:saveConfig()
+  cecho(string.format("<LightSteelBlue>[EMERGE] Added repository '%s' (%s/%s @ %s)%s<reset>\n",
+    name, owner, repo, branch, pub and "" or " [private]"))
+end
+
+-- Remove repository dynamically (config-backed)
+function ModuleManager:removeRepository(name)
+  if not name or name == "" then
+    cecho("<IndianRed>[EMERGE] Usage: emod repo remove <name><reset>\n")
+    return
+  end
+  local repos = self.config.repos or {}
+  local idx
+  for i, r in ipairs(repos) do
+    if r.name == name then
+      idx = i
+      break
+    end
+  end
+  if not idx then
+    cecho(string.format("<IndianRed>[EMERGE] Repository not found: %s<reset>\n", name))
+    return
+  end
+  local removed = table.remove(repos, idx)
+  self.config.repos = repos
+  self.repositories = repos
+  self:saveConfig()
+  cecho(string.format("<LightSteelBlue>[EMERGE] Removed repository '%s'<reset>\n", removed.name))
+end
+
 function ModuleManager:searchModules(search_term)
   if not search_term or search_term == "" then
     cecho("<IndianRed>[EMERGE] Usage: emod search <term><reset>\n")
@@ -2216,7 +2283,7 @@ function ModuleManager:_executeLoadDevModules()
     cecho("<red>[EMERGE] emerge-dev repository not configured.<reset>\n")
     return
   end
-  
+
   -- Enable dev modules flag
   self.config.show_dev_modules = true
   self:saveConfig()
@@ -2233,18 +2300,18 @@ function ModuleManager:_executeLoadDevModules()
         if not module_id and module_info and module_info.github and module_info.github.file then
           module_id = tostring(module_info.github.file):match("([^/]+)%.lua$")
         end
-        
+
         if module_id then
           module_info.repository = dev_repo.name
           self.discovery_cache.modules[module_id] = module_info
           added_count = added_count + 1
         end
       end
-      
+
       cecho(string.format("<LightSteelBlue>[EMERGE] Found %d developer modules in discovery cache.<reset>\n", added_count))
       cecho("<DimGrey>Use 'emod list' to see available modules.<reset>\n")
       cecho("<DimGrey>Use 'emod load <module>' to load specific modules.<reset>\n")
-      
+
       -- Save the updated discovery cache
       self:saveDiscoveryCache()
     else
@@ -2367,6 +2434,30 @@ function ModuleManager:createAliases()
   self.aliases.search = tempAlias("^emod search (.+)$", [[EMERGE:searchModules(matches[2])]])
   self.aliases.searchall = tempAlias("^emod searchall (.+)$", [[EMERGE:searchModulesAll(matches[2])]])
   self.aliases.info = tempAlias("^emod info (.+)$", [[EMERGE:showModuleInfo(matches[2])]])
+
+  -- Dynamic repository management
+  self.aliases.repo_add_simple = tempAlias("^emod repo add ([^ ]+) ([^ ]+)$", [[
+    local name = matches[2]
+    local ownerRepo = matches[3]
+    local owner, repo = ownerRepo:match("^([^/]+)/([^/]+)$")
+    if not owner or not repo then
+      cecho("<IndianRed>[EMERGE] Usage: emod repo add <name> <owner>/<repo> [branch] [public|private]<reset>\n")
+      return
+    end
+    EMERGE:addRepository(name, owner, repo)
+  ]])
+  self.aliases.repo_add_full = tempAlias("^emod repo add ([^ ]+) ([^ ]+) ([^ ]+) ([^ ]+)$", [[
+    local name, owner, repo, arg4 = matches[2], matches[3], matches[4], matches[5]
+    local branch, visibility = "main", "public"
+    if arg4:lower() == "public" or arg4:lower() == "private" then
+      visibility = arg4:lower()
+    else
+      branch = arg4
+    end
+    EMERGE:addRepository(name, owner, repo, branch, visibility)
+  ]])
+  self.aliases.repo_remove = tempAlias("^emod repo remove ([^ ]+)$", [[EMERGE:removeRepository(matches[2])]])
+
   self.aliases.debug = tempAlias("^emod debug$", [[EMERGE:toggleDebug()]])
 end
 
@@ -2403,7 +2494,7 @@ function ModuleManager:listModules()
   cecho("<LightSteelBlue>● Currently Loaded Modules<reset>\n")
   cecho(
     "<SlateGray>────────────────────────────────────────────────────────────────────────────────────────────────────<reset>\n")
-  
+
   -- Show emerge-manager first (always core system)
   cecho(string.format(
     "  <SteelBlue>emerge-manager<reset> <DimGrey>v%s<reset> <yellow>●<reset> <DimGrey>core system<reset>\n", self
@@ -2413,7 +2504,7 @@ function ModuleManager:listModules()
     -- Group loaded modules by repository
     local loaded_by_repo = {}
     local all_modules = self:getModuleList()
-    
+
     for id, module in pairs(self.modules) do
       local update_status = ""
       local cached_module = self.discovery_cache.modules[id]
@@ -2423,7 +2514,7 @@ function ModuleManager:listModules()
           update_status = " <yellow>(update available)<reset>"
         end
       end
-      
+
       -- Get repository information from cache or all_modules
       local repo = "unknown"
       if cached_module and cached_module.repository then
@@ -2431,7 +2522,7 @@ function ModuleManager:listModules()
       elseif all_modules[id] and all_modules[id].repository then
         repo = all_modules[id].repository
       end
-      
+
       loaded_by_repo[repo] = loaded_by_repo[repo] or {}
       table.insert(loaded_by_repo[repo], {
         id = id,
@@ -2439,23 +2530,23 @@ function ModuleManager:listModules()
         update_status = update_status
       })
     end
-    
+
     -- Sort repositories for consistent display
     local repos = {}
     for repo in pairs(loaded_by_repo) do
       table.insert(repos, repo)
     end
     table.sort(repos)
-    
+
     -- Display grouped by repository
     for _, repo in ipairs(repos) do
       local modules = loaded_by_repo[repo]
       if #modules > 0 then
         cecho(string.format("\n  <DimGrey>── %s ──<reset>\n", repo))
-        
+
         -- Sort modules within repository
         table.sort(modules, function(a, b) return a.id < b.id end)
-        
+
         for _, entry in ipairs(modules) do
           cecho(string.format("  <SteelBlue>%s<reset> v%s - %s%s\n",
             entry.id, entry.module.version or "?", entry.module.name or "Unknown", entry.update_status))
@@ -2833,7 +2924,42 @@ end
 function ModuleManager:init()
   -- Load configuration
   self:loadConfig()
-  
+
+  -- Migrate repositories to config-backed store (once) and bind to runtime
+  if not self.config.repos or type(self.config.repos) ~= "table" or #self.config.repos == 0 then
+    self.config.repos = {
+      {
+        name = "emerge",
+        owner = "rjm11",
+        repo = "emerge",
+        branch = "main",
+        public = true,
+        description = "Public manager and core system"
+      },
+      {
+        name = "emerge-private",
+        owner = "rjm11",
+        repo = "emerge-private",
+        branch = "main",
+        public = false,
+        description = "Private combat modules",
+        requires_token = true
+      },
+      {
+        name = "emerge-dev",
+        owner = "rjm11",
+        repo = "emerge-dev",
+        branch = "main",
+        public = false,
+        description = "Untested developer modules",
+        requires_token = true,
+        dev_only = true
+      }
+    }
+    self:saveConfig()
+  end
+  self.repositories = self.config.repos
+
   -- Load discovery cache
   self:loadDiscoveryCache()
 
@@ -2904,7 +3030,7 @@ function ModuleManager:unload(updating)
       killAlias(id)
     end
   end
-  
+
   -- Clean up all event handlers
   if self.handlers then
     for _, handler_id in pairs(self.handlers) do
@@ -2914,7 +3040,7 @@ function ModuleManager:unload(updating)
     end
     self.handlers = {}
   end
-  
+
   -- Clean up any tracked resources from modules
   if self.tracked_resources then
     for module_id, resources in pairs(self.tracked_resources) do
